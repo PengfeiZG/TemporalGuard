@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -33,9 +34,19 @@ def _make_judge(kind: str, model: str | None) -> Judge:
         from .judge.mock import CompositionMockJudge
 
         return CompositionMockJudge()
-    from .judge.anthropic_judge import AnthropicJudge
+    key_var = "OPENAI_API_KEY" if kind == "openai" else "ANTHROPIC_API_KEY"
+    if not os.environ.get(key_var):
+        raise SystemExit(f"error: {key_var} is not set (needed for --judge {kind})")
+    try:
+        if kind == "openai":
+            from .judge.openai_judge import OpenAIJudge
 
-    return AnthropicJudge(model=model)
+            return OpenAIJudge(model=model)
+        from .judge.anthropic_judge import AnthropicJudge
+
+        return AnthropicJudge(model=model)
+    except ImportError as exc:
+        raise SystemExit(f"error: {exc}") from exc
 
 
 def cmd_schedules(args: argparse.Namespace) -> int:
@@ -114,8 +125,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_schedules)
 
     def add_judge_args(q: argparse.ArgumentParser) -> None:
-        q.add_argument("--judge", choices=["mock", "anthropic"], default="mock")
-        q.add_argument("--model", default=None, help="model id for --judge anthropic")
+        q.add_argument("--judge", choices=["mock", "anthropic", "openai"], default="mock")
+        q.add_argument("--model", default=None, help="model id for --judge anthropic/openai")
 
     p = sub.add_parser("demo", help="run a short example session through one strategy")
     add_judge_args(p)

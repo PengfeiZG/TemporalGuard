@@ -45,6 +45,7 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 git clone <your-repo-url> temporalguard && cd temporalguard
 pip install -e ".[dev]"            # core + tests
 pip install -e ".[anthropic]"      # adds the Claude-backed judge
+pip install -e ".[openai]"         # adds the OpenAI-backed judge
 ```
 
 Python 3.10+. The core has no runtime dependencies.
@@ -88,6 +89,19 @@ export ANTHROPIC_API_KEY=...
 temporalguard eval --judge anthropic --model claude-haiku-4-5-20251001 \
     --price-in <USD/Mtok> --price-out <USD/Mtok> --format csv --out results.csv
 ```
+
+With OpenAI instead:
+
+```bash
+export OPENAI_API_KEY=...                 # PowerShell: $env:OPENAI_API_KEY="..."
+temporalguard demo --judge openai --model <model-id>
+temporalguard eval --judge openai --model <model-id> --per-family 2 --benign 5
+```
+
+In code: `from temporalguard.judge import OpenAIJudge`. The model comes from `--model`, the
+`model=` argument, or `TEMPORALGUARD_OPENAI_MODEL`; the built-in default is a best guess at a cheap
+current model, so set it explicitly. Neither real-API judge has been run against the live service
+by the authors yet; the unit tests use a fake client.
 
 Prices are deliberately not built in because they change.
 
@@ -158,3 +172,9 @@ examples/quickstart.py
 - AgentSentry (Zhang et al., 2026): models multi-turn indirect injection as a temporal causal
   takeover and localizes it with counterfactual re-execution. TemporalGuard studies a different
   mechanism, a semantic judge over an adaptively widened window, and its cost.
+
+Verify these citations against the papers before publishing anything.
+
+## License
+
+MIT

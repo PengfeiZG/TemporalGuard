@@ -49,6 +49,7 @@ the judge named, and a rationale, so runs are auditable and cost is measurable.
 | `judge/base.py` | `Judge` interface, `JudgeError`, verdict validation |
 | `judge/prompts.py` | system prompt, verdict tool schema, tag neutralization |
 | `judge/anthropic_judge.py` | Claude Messages API judge with forced `record_verdict` tool use |
+| `judge/openai_judge.py` | OpenAI Chat Completions judge with a forced `record_verdict` function call |
 | `judge/mock.py` | offline stand-in that composes fragment categories (testing only) |
 | `engine.py` | `TemporalGuard`: history, gate, escalation, verdict |
 | `strategies.py` | named (schedule, gate) configurations used in experiments |

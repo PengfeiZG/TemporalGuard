@@ -6,9 +6,13 @@ from .mock import CompositionMockJudge
 __all__ = ["CompositionMockJudge", "Judge", "JudgeError", "parse_verdict"]
 
 
-def __getattr__(name: str):  # lazy import so the `anthropic` package stays optional
+def __getattr__(name: str):  # lazy imports so the vendor packages stay optional
     if name == "AnthropicJudge":
         from .anthropic_judge import AnthropicJudge
 
         return AnthropicJudge
+    if name == "OpenAIJudge":
+        from .openai_judge import OpenAIJudge
+
+        return OpenAIJudge
     raise AttributeError(name)
