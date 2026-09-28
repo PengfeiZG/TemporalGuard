@@ -158,9 +158,3 @@ examples/quickstart.py
 - AgentSentry (Zhang et al., 2026): models multi-turn indirect injection as a temporal causal
   takeover and localizes it with counterfactual re-execution. TemporalGuard studies a different
   mechanism, a semantic judge over an adaptively widened window, and its cost.
-
-Verify these citations against the papers before publishing anything.
-
-## License
-
-MIT
