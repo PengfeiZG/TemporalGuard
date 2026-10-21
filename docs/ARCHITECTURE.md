@@ -95,6 +95,21 @@ allowing (fail open). If the judge errors, `on_error` applies (default: quaranti
 7. **Quarantined outputs stay in history.** They are withheld from the agent but still visible to
    later windows, so a fragment that was withheld can still help identify the rest.
 
+## Evaluation machinery
+
+- `eval/episodes.py`: placement kinds (adjacent, spaced, fib/pow2/random gaps, span), the family
+  table `FAMILY_SPECS`, and the schedule-aware attacker (`adaptive_positions`, `adaptive_suite`).
+- `eval/metrics.py`: pooled metrics plus `summarize_by_family` and `fragment_recall`.
+- `eval/stats.py`: cluster bootstrap over episodes (`bootstrap_ci`) and paired differences between
+  strategies on identical episodes (`paired_difference`). A difference whose interval contains 0 is
+  reported as not separable.
+- `judge/cache.py`: `CachingJudge` stores verdicts keyed by the exact prompt. A hit reports the
+  original token usage so costs stay comparable across strategies; real spend is `misses`.
+- `scanner/stateful.py`: gate that boosts an output's risk when it adds a new attack stage
+  (override, access, outbound) to stages seen in the last `lookback` outputs.
+- `EngineConfig.min_window`: ablation for the early-stop failure mode, where a confident benign
+  verdict on a lone fragment ends escalation before the older context is read.
+
 ## Cost model
 
 Worst case (no early stop) at history length `n` is `sum(windows(n))` outputs of context. For

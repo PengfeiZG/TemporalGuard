@@ -10,7 +10,7 @@ from ..models import JudgeResult, ToolOutput, Usage
 from .base import Judge, JudgeError, parse_verdict
 from .prompts import SYSTEM_PROMPT, VERDICT_TOOL, build_user_message
 
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+DEFAULT_MODEL = "claude-haiku-5-5"
 
 
 class AnthropicJudge(Judge):

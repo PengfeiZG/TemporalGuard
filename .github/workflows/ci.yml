@@ -17,4 +17,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: ruff check .
-      - run: pytest -q
+      - run: ruff format --check .
+      - run: mypy src --ignore-missing-imports
+      - run: pytest -q --cov=temporalguard --cov-report=term-missing

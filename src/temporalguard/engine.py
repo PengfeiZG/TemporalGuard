@@ -75,6 +75,8 @@ class TemporalGuard:
         cfg = self.config
         n = len(self.history)
         sizes = self.schedule.windows(n) or [n]
+        if cfg.min_window > 1:
+            sizes = [w for w in sizes if w >= cfg.min_window] or [sizes[-1]]
         decision = Decision(
             verdict=Verdict.ALLOW, output_index=output.index, stage="judge", risk_score=risk
         )

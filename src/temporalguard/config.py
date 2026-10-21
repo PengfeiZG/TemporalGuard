@@ -22,6 +22,9 @@ class EngineConfig:
         judge's label, "quarantine" fails closed, "allow" fails open.
     on_error: what to do when the judge fails: "quarantine" (default, fail closed) or "allow".
     max_chars_per_output: per-output truncation before text is sent to the judge.
+    min_window: skip schedule windows smaller than this (if none are large enough, only the
+        largest is used). Guards against a confident-benign verdict on a lone fragment ending
+        escalation too early; 1 keeps the schedule unchanged.
     """
 
     gate_threshold: float = 0.2
@@ -32,6 +35,7 @@ class EngineConfig:
     on_ambiguous: str = "label"
     on_error: str = "quarantine"
     max_chars_per_output: int = 4000
+    min_window: int = 1
 
     def __post_init__(self) -> None:
         for name in (
@@ -47,5 +51,7 @@ class EngineConfig:
             raise ValueError(f"on_ambiguous must be one of {sorted(_AMBIGUOUS)}")
         if self.on_error not in _ERRORS:
             raise ValueError(f"on_error must be one of {sorted(_ERRORS)}")
+        if self.min_window < 1:
+            raise ValueError("min_window must be at least 1")
         if self.max_chars_per_output < 100:
             raise ValueError("max_chars_per_output must be at least 100")

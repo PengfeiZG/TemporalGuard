@@ -32,6 +32,11 @@ class OpenAIJudge(Judge):
 
     Requires `pip install "temporalguard[openai]"` and the OPENAI_API_KEY environment variable.
     Set the model with the `model` argument or TEMPORALGUARD_OPENAI_MODEL.
+
+    Some models reject function tools on Chat Completions unless reasoning is turned off
+    (error: "Function tools with reasoning_effort are not supported ... set reasoning_effort to
+    'none'"). Pass `reasoning_effort="none"` or set TEMPORALGUARD_OPENAI_REASONING_EFFORT=none.
+    It is only sent when set, because models without reasoning reject the parameter.
     """
 
     name = "openai"
@@ -43,6 +48,7 @@ class OpenAIJudge(Judge):
         max_completion_tokens: int = 600,
         timeout: float = 60.0,
         max_retries: int = 2,
+        reasoning_effort: str | None = None,
     ) -> None:
         if client is None:
             try:
@@ -55,9 +61,13 @@ class OpenAIJudge(Judge):
         self.client = client
         self.model = model or os.environ.get("TEMPORALGUARD_OPENAI_MODEL", DEFAULT_MODEL)
         self.max_completion_tokens = max_completion_tokens
+        self.reasoning_effort = reasoning_effort or os.environ.get(
+            "TEMPORALGUARD_OPENAI_REASONING_EFFORT"
+        )
 
     def judge(self, window: Sequence[ToolOutput], task: str | None = None) -> JudgeResult:
         start = time.perf_counter()
+        extra = {"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -68,6 +78,7 @@ class OpenAIJudge(Judge):
                 ],
                 tools=[_tool_spec()],
                 tool_choice={"type": "function", "function": {"name": VERDICT_TOOL["name"]}},
+                **extra,
             )
         except Exception as exc:  # network, auth, rate limit, unsupported parameter, ...
             raise JudgeError(f"OpenAI API call failed: {exc}") from exc

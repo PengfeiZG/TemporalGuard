@@ -12,7 +12,15 @@ from .config import EngineConfig
 from .engine import TemporalGuard
 from .judge.base import Judge
 from .scanner.heuristic import HeuristicScanner, Scanner
-from .schedules import Fibonacci, Fixed, Full, PowerOfTwo, WindowSchedule
+from .scanner.stateful import StatefulScanner
+from .schedules import (
+    Fibonacci,
+    Fixed,
+    Full,
+    PowerOfTwo,
+    WindowSchedule,
+    WithFullFallback,
+)
 
 
 @dataclass(frozen=True)
@@ -21,6 +29,7 @@ class Strategy:
     schedule: WindowSchedule
     gate: bool
     description: str
+    scanner: str = "heuristic"  # "heuristic" or "stateful"
 
 
 STRATEGIES: dict[str, Strategy] = {
@@ -34,8 +43,20 @@ STRATEGIES: dict[str, Strategy] = {
         Strategy("gated_full", Full(), True, "F: cheap gate, then one full-history judge"),
         Strategy("pow2_gated", PowerOfTwo(), True, "D + cheap gate"),
         Strategy("fib_gated", Fibonacci(), True, "E + cheap gate"),
+        Strategy("fib_fallback", WithFullFallback(Fibonacci()), False, "E + final full window"),
+        Strategy("fib_stateful", Fibonacci(), True, "E + history-aware gate", "stateful"),
+        Strategy("pow2_stateful", PowerOfTwo(), True, "D + history-aware gate", "stateful"),
+        Strategy("gated_full_stateful", Full(), True, "F with a history-aware gate", "stateful"),
     )
 }
+
+
+def make_scanner(kind: str) -> Scanner:
+    if kind == "heuristic":
+        return HeuristicScanner()
+    if kind == "stateful":
+        return StatefulScanner()
+    raise KeyError(f"unknown scanner kind {kind!r}")
 
 
 def build_guard(
@@ -50,7 +71,7 @@ def build_guard(
     strategy = STRATEGIES[name]
     return TemporalGuard(
         judge=judge,
-        scanner=scanner or (HeuristicScanner() if strategy.gate else None),
+        scanner=scanner or (make_scanner(strategy.scanner) if strategy.gate else None),
         schedule=strategy.schedule,
         config=config,
         gate=strategy.gate,

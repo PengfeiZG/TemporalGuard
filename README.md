@@ -116,14 +116,34 @@ Prices are deliberately not built in because they change.
 | `fib` | 1,2,3,5,8,13 | no | the hypothesis under test |
 | `gated_full` | whole history | yes | cheap gate + one full-context judge (is gating alone enough?) |
 | `pow2_gated`, `fib_gated` | as above | yes | schedule and gate combined |
+| `fib_fallback` | 1,2,3,5,8,13 then whole history | no | mitigation for the schedule blind spot |
+| `fib_stateful`, `pow2_stateful`, `gated_full_stateful` | as named | history-aware | does a gate that tracks attack stages across outputs reduce gate misses? |
 
 Running the schedule comparison with and without the gate separates two effects that are easy to
 conflate: savings from *skipping* the judge on low-risk outputs, and savings from *how the window
 grows*.
 
+## Benchmark families and the adaptive attacker
+
+`build_suite` produces attack episodes in these families (plus benign sessions with look-alike
+content): `adjacent`, `spaced`, `fib_gaps`, `pow2_gaps`, `random_gaps`, `paraphrased`,
+`long_context`, `long_span`. `fib_gaps`, `pow2_gaps` and `random_gaps` use identical fragments with
+different spacing so no schedule is rewarded for matching its own rhythm; `long_span` puts the
+oldest fragment beyond the largest window of the escalating schedules. `temporalguard eval
+--adaptive` runs a schedule-aware attacker that places the oldest fragment in each strategy's
+blind spot.
+
+```bash
+temporalguard eval --by-family --ci                 # per-family recall, bootstrap CIs, paired diffs
+temporalguard eval --adaptive                       # schedule-aware attacker
+temporalguard eval --judge anthropic --cache runs/cache.jsonl   # pay once per distinct window
+temporalguard eval --min-window 3                   # ablation: never stop at windows below 3
+```
+
 ## Metrics
 
-Attack success rate (1 − recall), early containment (flagged before the final fragment arrives),
+Attack success rate (1 − recall), fragment recall (share of true fragments flagged or named,
+which exposes partial views of an attack), early containment (flagged before the final fragment arrives),
 precision, output-level false-positive rate, localization (Jaccard of named vs true fragments),
 gate miss rate, judge calls, tokens and context examined per output, latency, and optional USD
 cost. Definitions are in `src/temporalguard/eval/metrics.py`.
@@ -148,14 +168,15 @@ examples/quickstart.py
 
 - **Mock judge numbers are not results.** It exists so the pipeline and metrics can be tested
   without cost. Any table produced with `--judge mock` only demonstrates that the plumbing works.
-- **Fixtures are synthetic and tiny** (four fragment sets, a few benign look-alikes). The planned
-  benchmark derives distributed episodes from the AgentDojo task suites; that adapter is not
-  written yet.
-- **Not implemented yet:** the AgentDojo-derived benchmark, paraphrased/encoded/cross-tool
-  fragment families, and an adaptive attacker that knows the window schedule. Until then the
-  schedule's blind spot (see `temporalguard schedules`) is a known, unmeasured weakness: any
-  schedule that never inspects the whole history can miss fragments older than its largest
-  window. `WithFullFallback` exists as a mitigation to evaluate.
+- **Fixtures are synthetic and small** (four lexical and three paraphrased fragment sets, a few
+  benign look-alikes). The planned benchmark derives distributed episodes from the AgentDojo task
+  suites; that adapter is not written yet.
+- **Not implemented yet:** the AgentDojo-derived benchmark, encoded and cross-tool fragment
+  families, and results from a real judge. The schedule-aware attacker and the fallback mitigation
+  exist and are tested with the mock judge only.
+- **Mock-judge comparisons between schedules are artifacts**, not findings. The mock keys on the
+  same keywords as the scanner and the fixtures, so schedule differences it shows depend on how the
+  mock composes categories.
 - **Cost is not automatically lower.** Escalating through 1,2,3,5,8,13 costs 32 outputs' worth of
   context in the worst case at n = 20, more than one full scan. Savings only appear if most
   decisions stop early, which is why `gated_full` is a required baseline.

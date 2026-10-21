@@ -4,7 +4,7 @@ import pytest
 
 from temporalguard.cli import main
 from temporalguard.eval import build_suite, compare, episodes_from_json, episodes_to_json
-from temporalguard.eval.episodes import build_episode, placement
+from temporalguard.eval.episodes import FAMILY_SPECS, build_episode, placement
 from temporalguard.eval.fixtures import FRAGMENT_SETS
 from temporalguard.judge import CompositionMockJudge
 
@@ -41,7 +41,7 @@ def test_suite_is_deterministic_and_roundtrips_json():
 
 def test_suite_composition():
     suite = build_suite(seed=0, per_family=4, benign=7)
-    assert sum(e.is_attack for e in suite) == 16
+    assert sum(e.is_attack for e in suite) == 4 * len(FAMILY_SPECS)
     assert sum(not e.is_attack for e in suite) == 7
     long_ctx = [e for e in suite if e.family == "long_context"]
     assert all(len(e.outputs) >= 17 for e in long_ctx)
@@ -52,7 +52,8 @@ def rows_by_name(rows):
 
 
 def test_offline_comparison_shows_expected_qualitative_ordering():
-    rows = rows_by_name(compare(CompositionMockJudge(), build_suite(seed=0)))
+    suite = build_suite(seed=0, families=["adjacent", "spaced", "fib_gaps", "long_context"])
+    rows = rows_by_name(compare(CompositionMockJudge(), suite))
     assert rows["per_message"]["recall"] == 0.0  # split attacks are invisible one output at a time
     assert rows["fib"]["recall"] > 0.9 and rows["full"]["recall"] > 0.9
     assert rows["fib_gated"]["judge_calls_per_output"] < rows["fib"]["judge_calls_per_output"]
