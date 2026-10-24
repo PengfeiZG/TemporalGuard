@@ -228,10 +228,21 @@ def cmd_eval(args: argparse.Namespace) -> int:
         print(MOCK_NOTICE, file=sys.stderr)
 
     if args.adaptive:
-        rows = compare_adaptive(judge, args.strategies, config, seed=args.seed)
+        progress = None if args.quiet or args.judge == "mock" else _progress
+        collected: dict = {}
+        rows = compare_adaptive(
+            judge,
+            args.strategies,
+            config,
+            seed=args.seed,
+            workers=args.workers,
+            progress=progress,
+            pool=args.adaptive_pool,
+            collect=collected,
+        )
         print("schedule-aware attacker (each strategy attacked around its own schedule)")
         print(to_markdown(rows))
-        _warn_on_errors(rows)
+        _warn_on_errors(rows, collected)
         _report_cache(judge)
         return 0
 
@@ -479,6 +490,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--boot", type=int, default=1000, help="bootstrap resamples")
     p.add_argument("--by-family", action="store_true", help="also print recall per attack family")
     p.add_argument("--adaptive", action="store_true", help="run the schedule-aware attacker")
+    p.add_argument(
+        "--adaptive-pool",
+        choices=["lexical", "referential"],
+        default="lexical",
+        help="fragments the attacker uses; referential needs context to detect",
+    )
     p.add_argument("--min-window", type=int, default=1, help="skip windows smaller than this")
     p.set_defaults(func=cmd_eval)
 

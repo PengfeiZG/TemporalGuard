@@ -296,13 +296,29 @@ def adaptive_positions(
 
 
 def adaptive_suite(
-    schedule: WindowSchedule, seed: int = 0, per_set: int = 2, fallback_len: int = 24
+    schedule: WindowSchedule,
+    seed: int = 0,
+    per_set: int = 2,
+    fallback_len: int = 24,
+    pool: str = "lexical",
 ) -> list[Episode]:
-    """Attack episodes tailored to `schedule` (see `adaptive_positions`). No benign episodes."""
+    """Attack episodes tailored to `schedule` (see `adaptive_positions`). No benign episodes.
+
+    pool "lexical" uses the original keyword-style fragments. A real judge catches those one at a
+    time, so where they are placed hardly matters. pool "referential" uses the referential attack
+    sets with their user tasks: the oldest fragment names the file, so placing it outside a
+    window can hide the attack.
+    """
+    if pool not in {"lexical", "referential"}:
+        raise ValueError("pool must be 'lexical' or 'referential'")
     rng = random.Random(seed)
     episodes: list[Episode] = []
-    for name in sorted(FRAGMENT_SETS):
-        fragments = FRAGMENT_SETS[name]
+    if pool == "lexical":
+        sets: dict[str, tuple[list[str], dict]] = {n: (f, {}) for n, f in FRAGMENT_SETS.items()}
+    else:
+        sets = {n: (v["attack"], {"task": v["task"]}) for n, v in REFERENTIAL_SETS.items()}
+    for name in sorted(sets):
+        fragments, extra = sets[name]
         if len(fragments) < 2:
             continue
         positions = adaptive_positions(schedule, len(fragments), fallback_len)
@@ -315,6 +331,7 @@ def adaptive_suite(
                     positions,
                     rng,
                     tail=0,
+                    **extra,
                 )
             )
     return episodes

@@ -793,3 +793,60 @@ def test_error_warning_shows_the_first_distinct_error_messages(capsys, monkeypat
     err = capsys.readouterr().err
     assert "WARNING: judge calls failed" in err
     assert err.count("first error:") == 1 and "claude-xyz not found" in err
+
+
+def test_adaptive_comparison_accepts_workers_and_reports_progress():
+    lines: list[str] = []
+    seq = compare_adaptive(CompositionMockJudge(), ["fixed5", "fib_fallback"])
+    par = compare_adaptive(
+        CompositionMockJudge(), ["fixed5", "fib_fallback"], workers=3, progress=lines.append
+    )
+    assert [r["strategy"] for r in seq] == [r["strategy"] for r in par]
+    assert [r["recall"] for r in seq] == [r["recall"] for r in par]
+    assert any(line.startswith("running fixed5") for line in lines)
+
+
+def test_cli_adaptive_with_workers_runs(capsys):
+    argv = ["eval", "--adaptive", "--strategies", "fixed5", "fib_fallback", "--workers", "2"]
+    assert main(argv) == 0
+    assert "schedule-aware attacker" in capsys.readouterr().out
+
+
+def test_adaptive_referential_pool_uses_the_referential_sets_with_their_tasks():
+    from temporalguard.eval.fixtures import REFERENTIAL_SETS
+
+    suite = adaptive_suite(Fibonacci(), seed=0, per_set=1, pool="referential")
+    assert len(suite) == len(REFERENTIAL_SETS) and all(e.family == "adaptive" for e in suite)
+    tasks = {s["task"] for s in REFERENTIAL_SETS.values()}
+    assert all(e.task in tasks and len(e.attack_indices) == 3 for e in suite)
+    lexical = adaptive_suite(Fibonacci(), seed=0, per_set=1)
+    assert [e.task for e in lexical] != [e.task for e in suite]
+    with pytest.raises(ValueError):
+        adaptive_suite(Fibonacci(), pool="nope")
+
+
+def test_cli_adaptive_pool_flag_runs(capsys):
+    argv = [
+        "eval",
+        "--adaptive",
+        "--adaptive-pool",
+        "referential",
+        "--strategies",
+        "fixed5",
+        "full",
+    ]
+    assert main(argv) == 0
+    assert "schedule-aware attacker" in capsys.readouterr().out
+
+
+def test_adaptive_warning_shows_the_first_error_message(capsys, monkeypatch):
+    import temporalguard.cli as cli
+
+    class Rejecting(Judge):
+        def judge(self, window, task=None):
+            raise JudgeError("overloaded_error: try again later")
+
+    monkeypatch.setattr(cli, "_make_judge", lambda *a, **k: Rejecting())
+    assert main(["eval", "--adaptive", "--strategies", "fixed5"]) == 0
+    err = capsys.readouterr().err
+    assert "WARNING: judge calls failed" in err and "overloaded_error" in err

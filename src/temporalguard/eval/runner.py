@@ -151,6 +151,10 @@ def compare_adaptive(
     config: EngineConfig | None = None,
     seed: int = 0,
     per_set: int = 2,
+    workers: int = 1,
+    progress: Callable[[str], None] | None = None,
+    pool: str = "lexical",
+    collect: dict[str, list[EpisodeResult]] | None = None,
 ) -> list[dict]:
     """Schedule-aware attacker: each strategy faces episodes built around its OWN schedule.
 
@@ -160,7 +164,11 @@ def compare_adaptive(
     """
     rows = []
     for name in strategies or default_strategy_names():
-        episodes = adaptive_suite(STRATEGIES[name].schedule, seed=seed, per_set=per_set)
-        s = summarize(run_strategy(name, judge, episodes, config))
-        rows.append({"strategy": name, **s})
+        episodes = adaptive_suite(STRATEGIES[name].schedule, seed=seed, per_set=per_set, pool=pool)
+        if progress:
+            progress(f"running {name} ...")
+        results = run_strategy(name, judge, episodes, config, workers, progress)
+        if collect is not None:
+            collect[name] = results
+        rows.append({"strategy": name, **summarize(results)})
     return rows
