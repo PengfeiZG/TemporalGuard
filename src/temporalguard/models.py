@@ -35,12 +35,14 @@ class Usage:
     output_tokens: int = 0
     calls: int = 0
     latency_s: float = 0.0
+    cost_usd: float = 0.0  # set by CascadeJudge, which knows each tier's price
 
     def add(self, other: Usage) -> None:
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
         self.calls += other.calls
         self.latency_s += other.latency_s
+        self.cost_usd += other.cost_usd
 
     @property
     def total_tokens(self) -> int:

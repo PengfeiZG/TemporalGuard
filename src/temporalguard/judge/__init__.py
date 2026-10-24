@@ -1,10 +1,19 @@
 """Semantic judges: the LLM component that reasons over a window of tool outputs."""
 
-from .base import Judge, JudgeError, parse_verdict
+from .base import BudgetExceeded, Judge, JudgeError, parse_verdict
 from .cache import CachingJudge
+from .cascade import CascadeJudge
 from .mock import CompositionMockJudge
 
-__all__ = ["CachingJudge", "CompositionMockJudge", "Judge", "JudgeError", "parse_verdict"]
+__all__ = [
+    "BudgetExceeded",
+    "CachingJudge",
+    "CascadeJudge",
+    "CompositionMockJudge",
+    "Judge",
+    "JudgeError",
+    "parse_verdict",
+]
 
 
 def __getattr__(name: str):  # lazy imports so the vendor packages stay optional

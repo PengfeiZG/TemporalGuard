@@ -603,3 +603,193 @@ def test_cli_no_twins_flag(capsys):
             "--benign", "0", "--no-twins", "--by-family"]  # fmt: skip
     assert main(argv) == 0
     assert "twin-pair accuracy" not in capsys.readouterr().out
+
+
+# ----------------------------------------------------------------------------- AgentDojo-derived
+def test_agentdojo_attacks_are_complete_and_sanitized():
+    import re
+
+    from temporalguard.eval import agentdojo_data as ad
+
+    assert len(ad.ATTACKS) == 27 and set(ad.USER_TASKS) == {
+        "workspace",
+        "banking",
+        "travel",
+        "slack",
+    }
+    real = re.compile(r"[A-Za-z0-9-]+\.(com|org|net|io)\b", re.I)
+    for key, a in ad.ATTACKS.items():
+        assert len(a["fragments"]) == 3 and a["suite"] in ad.USER_TASKS, key
+        for text in [a["goal"], *a["fragments"]]:
+            assert not real.search(text), (key, text)
+            assert "important message from" not in text.lower(), key  # no AgentDojo wrapper
+
+
+def test_agentdojo_review_sheet_matches_the_module_and_lists_every_attack():
+    import pathlib
+
+    from temporalguard.eval import agentdojo_data as ad
+
+    sheet = ad.review_markdown()
+    assert all(f"| {key} |" in sheet for key in ad.ATTACKS)
+    doc = pathlib.Path(__file__).resolve().parents[1] / "docs" / "AGENTDOJO_REVIEW.md"
+
+    def without_ok_column(text: str) -> list[str]:
+        # the reviewers' marks live in the last column, so they must not break the comparison
+        rows = []
+        for line in text.replace("\r\n", "\n").splitlines():
+            if line.startswith("|"):
+                line = line.rstrip().rstrip("|").rsplit("|", 1)[0].rstrip()
+            rows.append(line)
+        return rows
+
+    if doc.exists():  # absent in an installed (non-source) copy
+        assert without_ok_column(doc.read_text(encoding="utf-8")) == without_ok_column(sheet)
+
+
+def test_agentdojo_families_build_attacks_with_user_tasks_and_realistic_filler():
+    from temporalguard.eval import agentdojo_data as ad
+    from temporalguard.eval.episodes import agentdojo_filler
+    from temporalguard.eval.fixtures import FILLER
+
+    suite = build_suite(seed=1, per_family=27, benign=0, families=["agentdojo", "agentdojo_span"])
+    attacks = [e for e in suite if e.is_attack]
+    assert len(attacks) == 54 and not any(e.family.endswith("_twin") for e in suite)
+    all_tasks = {t for ts in ad.USER_TASKS.values() for t in ts}
+    by_fragments = {tuple(a["fragments"]): a["suite"] for a in ad.ATTACKS.values()}
+
+    def suite_of(e):
+        return by_fragments[tuple(e.outputs[i][1] for i in e.attack_indices)]
+
+    for e in attacks:
+        assert e.task in all_tasks and len(e.attack_indices) == 3
+        fragments = {e.outputs[i][1] for i in e.attack_indices}
+        others = [c for i, (_, c) in enumerate(e.outputs) if i not in e.attack_indices]
+        assert not fragments & set(others)
+        allowed = set(agentdojo_filler(suite_of(e)))
+        assert set(others) <= allowed
+        if len(ad.BENIGN_POOL[suite_of(e)]) >= 20 and len(others) >= 6:
+            assert any(c not in FILLER for c in others)  # workspace and travel use real text
+    assert all(e.attack_span >= 20 for e in attacks if e.family == "agentdojo_span")
+
+
+def test_agentdojo_benign_family_has_no_attack_labels_and_only_environment_text():
+    from temporalguard.eval import agentdojo_data as ad
+    from temporalguard.eval.episodes import agentdojo_filler
+
+    suite = build_suite(seed=0, per_family=8, benign=0, families=["agentdojo_benign"])
+    assert len(suite) == 8 and not any(e.is_attack for e in suite)
+    allowed = {s for suite_name in ad.USER_TASKS for s in agentdojo_filler(suite_name)}
+    assert all(c in allowed for e in suite for _, c in e.outputs)
+    assert {e.family for e in suite} == {"agentdojo_benign"}
+
+
+def test_agentdojo_families_are_opt_in_and_deterministic():
+    assert "agentdojo" in FAMILY_SPECS and "agentdojo" not in DEFAULT_FAMILIES
+    a = build_suite(seed=3, per_family=5, benign=0, families=["agentdojo"])
+    b = build_suite(seed=3, per_family=5, benign=0, families=["agentdojo"])
+    assert [e.outputs for e in a] == [e.outputs for e in b]
+
+
+def test_cli_by_family_reports_agentdojo_benign_false_alarms(capsys):
+    argv = ["eval", "--families", "agentdojo", "agentdojo_benign", "--per-family", "4",
+            "--benign", "0", "--strategies", "per_message", "--by-family"]  # fmt: skip
+    assert main(argv) == 0
+    out = capsys.readouterr().out
+    assert "false-alarm rate by benign family" in out and "agentdojo_benign" in out
+
+
+def test_review_sheet_comparison_ignores_marks_in_the_ok_column(tmp_path):
+    from temporalguard.eval import agentdojo_data as ad
+
+    sheet = ad.review_markdown()
+    marked = sheet.replace(" |  |\n", " | PZ |\n")
+    assert marked != sheet
+    doc = tmp_path / "AGENTDOJO_REVIEW.md"
+    doc.write_text(marked, encoding="utf-8")
+
+    def strip(text):
+        out = []
+        for line in text.splitlines():
+            if line.startswith("|"):
+                line = line.rstrip().rstrip("|").rsplit("|", 1)[0].rstrip()
+            out.append(line)
+        return out
+
+    assert strip(doc.read_text(encoding="utf-8")) == strip(sheet)
+
+
+def test_cache_survives_a_truncated_last_line_and_keeps_appending_cleanly(tmp_path):
+    path = tmp_path / "c.jsonl"
+    first = CachingJudge(CountingJudge(), path)
+    first.judge(W, "task")
+    path.write_text(path.read_text(encoding="utf-8") + '{"key": "abc", "resu', encoding="utf-8")
+
+    inner = CountingJudge()
+    second = CachingJudge(inner, path)  # must not raise on the cut-short line
+    assert second.skipped_lines == 1
+    second.judge(W, "task")  # still cached from the first run
+    assert inner.calls == 0
+    second.judge(W[:1], "task")  # a new call is appended after the repaired line
+
+    third = CachingJudge(CountingJudge(), path)
+    assert third.skipped_lines == 1 and len(third._store) == 2
+
+
+# ----------------------------------------------------------------------------- parallel workers
+def test_parallel_workers_give_identical_results_in_the_same_order():
+    suite = build_suite(seed=0, per_family=3, benign=3, families=["adjacent", "long_span"])
+    seq = run_strategy("fib_min3_fallback_confirm", CompositionMockJudge(), suite, workers=1)
+    par = run_strategy("fib_min3_fallback_confirm", CompositionMockJudge(), suite, workers=4)
+    assert [r.episode.id for r in seq] == [r.episode.id for r in par]
+
+    def key(rs):
+        return [[(d.output_index, d.verdict, d.fragment_indices) for d in r.decisions] for r in rs]
+
+    assert key(seq) == key(par)
+
+
+def test_workers_must_be_positive_and_progress_reports_every_ten_episodes():
+    suite = build_suite(seed=0, per_family=12, benign=0, families=["adjacent"])
+    with pytest.raises(ValueError):
+        run_strategy("per_message", CompositionMockJudge(), suite, workers=0)
+    lines: list[str] = []
+    run_strategy("per_message", CompositionMockJudge(), suite, progress=lines.append)
+    assert [ln.split(":")[1].strip().split(" ")[0] for ln in lines] == ["10/12", "12/12"]
+
+
+def test_cache_is_safe_under_concurrent_writers(tmp_path):
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+
+    inner = CountingJudge()
+    cj = CachingJudge(inner, tmp_path / "c.jsonl")
+    windows = [[ToolOutput(i, "t", f"w{i}")] for i in range(60)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda w: cj.judge(w, "task"), windows * 3))
+    lines = (tmp_path / "c.jsonl").read_text(encoding="utf-8").splitlines()
+    assert all(json.loads(line)["key"] for line in lines)  # no interleaved or broken lines
+    assert cj.hits + cj.misses == 180 and cj.misses >= 60
+    again = CachingJudge(CountingJudge(), tmp_path / "c.jsonl")
+    assert again.skipped_lines == 0 and len(again._store) == 60
+
+
+def test_cli_workers_flag_runs(capsys):
+    argv = ["eval", "--strategies", "fib", "--families", "adjacent", "--per-family", "4",
+            "--benign", "1", "--workers", "3"]  # fmt: skip
+    assert main(argv) == 0
+    assert "fib" in capsys.readouterr().out
+
+
+def test_error_warning_shows_the_first_distinct_error_messages(capsys, monkeypatch):
+    import temporalguard.cli as cli
+
+    class Rejecting(Judge):
+        def judge(self, window, task=None):
+            raise JudgeError("model: claude-xyz not found")
+
+    monkeypatch.setattr(cli, "_make_judge", lambda *a, **k: Rejecting())
+    assert main(["eval", "--strategies", "fib", "--per-family", "1", "--benign", "1"]) == 0
+    err = capsys.readouterr().err
+    assert "WARNING: judge calls failed" in err
+    assert err.count("first error:") == 1 and "claude-xyz not found" in err

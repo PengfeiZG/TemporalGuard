@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 
 from ..schedules import Fibonacci, WindowSchedule, blind_spot
+from . import agentdojo_data
 from .fixtures import (
     BENIGN_LOOKALIKES,
     DEFINITIONAL_SETS,
@@ -100,8 +101,12 @@ def build_episode(
     task: str = "Summarize the retrieved documents for the user.",
     lead: int = 0,
     tail: int = 1,
+    filler: Sequence[str] | None = None,
 ) -> Episode:
-    """Fill positions with `fragments` and everything else with random filler."""
+    """Fill positions with `fragments` and everything else with random filler.
+
+    `filler` defaults to the generic pool; the AgentDojo families pass realistic benign outputs.
+    """
     if len(fragments) != len(positions):
         raise ValueError("need one position per fragment")
     if list(positions) != sorted(set(positions)):
@@ -111,7 +116,7 @@ def build_episode(
     outputs: list[tuple[str, str]] = []
     frag_at = {offset + p: f for p, f in zip(positions, fragments, strict=True)}
     for i in range(total):
-        text = frag_at.get(i) or rng.choice(FILLER)
+        text = frag_at.get(i) or rng.choice(filler or FILLER)
         outputs.append((_tool_for(rng), text))
     return Episode(episode_id, family, task, outputs, sorted(frag_at))
 
@@ -134,6 +139,21 @@ def make_twin(attack: Episode, benign_fragments: Sequence[str], family: str) -> 
     for idx, text in zip(attack.attack_indices, benign_fragments, strict=True):
         outputs[idx] = (outputs[idx][0], text)
     return Episode(attack.id.replace(attack.family, family, 1), family, attack.task, outputs)
+
+
+def agentdojo_filler(suite: str) -> list[str]:
+    """Benign outputs for an AgentDojo suite; thin suites are topped up with generic filler."""
+    pool = list(agentdojo_data.BENIGN_POOL[suite])
+    return pool + list(FILLER) if len(pool) < 20 else pool
+
+
+def build_benign_agentdojo(
+    episode_id: str, rng: random.Random, length: int, suite: str, task: str
+) -> Episode:
+    """A session made only of AgentDojo's own benign environment text (no injected content)."""
+    pool = agentdojo_filler(suite)
+    outputs = [(_tool_for(rng), rng.choice(pool)) for _ in range(length)]
+    return Episode(episode_id, "agentdojo_benign", task, outputs)
 
 
 # name -> how episodes of that family are built. `lead` is the number of ordinary outputs before
@@ -162,6 +182,13 @@ FAMILY_SPECS: dict[str, dict] = {
     "referential_span": dict(
         kind="span", lead=(0, 2), sets="referential", span=(20, 30), twin=True
     ),
+    # Attacks derived from AgentDojo's injection goals, each split into three fragments, with
+    # AgentDojo's own benign environment text as filler and its user-task prompts as the task.
+    # Use --per-family 27 to build every attack once. See eval/agentdojo_data.py.
+    "agentdojo": dict(kind="adjacent", lead=(2, 6), sets="agentdojo"),
+    "agentdojo_span": dict(kind="span", lead=(0, 2), sets="agentdojo", span=(20, 30)),
+    # Benign sessions made only of AgentDojo's environment text: the false-positive check.
+    "agentdojo_benign": dict(benign_only=True, sets="agentdojo"),
 }
 # fragment pool name -> {set name: {"attack": [...], "benign": [...], optional "task": str}}
 TWIN_SETS: dict[str, dict] = {
@@ -179,6 +206,7 @@ FRAGMENT_POOLS = {
     "dependent": {name: v["attack"] for name, v in DEPENDENT_SETS.items()},
     "definitional": {name: v["attack"] for name, v in DEFINITIONAL_SETS.items()},
     "referential": {name: v["attack"] for name, v in REFERENTIAL_SETS.items()},
+    "agentdojo": {key: v["fragments"] for key, v in agentdojo_data.ATTACKS.items()},
 }
 
 
@@ -206,6 +234,21 @@ def build_suite(
     episodes: list[Episode] = []
     for family in names:
         spec = FAMILY_SPECS[family]
+        if spec.get("benign_only"):
+            suites = sorted(agentdojo_data.USER_TASKS)
+            for i in range(per_family):
+                suite = suites[i % len(suites)]
+                tasks = agentdojo_data.USER_TASKS[suite]
+                episodes.append(
+                    build_benign_agentdojo(
+                        f"{family}-{i:02d}",
+                        rng,
+                        rng.randint(6, 24),
+                        suite,
+                        tasks[(i // 4) % len(tasks)],
+                    )
+                )
+            continue
         pool = FRAGMENT_POOLS[spec["sets"]]
         set_names = sorted(pool)
         for i in range(per_family):
@@ -216,6 +259,10 @@ def build_suite(
             set_name = set_names[i % len(set_names)]
             twin_set = TWIN_SETS.get(spec["sets"], {}).get(set_name, {})
             task_kw = {"task": twin_set["task"]} if "task" in twin_set else {}
+            if spec["sets"] == "agentdojo":
+                suite = agentdojo_data.ATTACKS[set_name]["suite"]
+                tasks = agentdojo_data.USER_TASKS[suite]
+                task_kw = {"task": tasks[i % len(tasks)], "filler": agentdojo_filler(suite)}
             attack = build_episode(
                 f"{family}-{i:02d}", family, fragments, positions, rng, lead=lead, **task_kw
             )

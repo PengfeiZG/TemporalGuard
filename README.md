@@ -168,6 +168,80 @@ schedule with a full-history window) and `_confirm` variants, plus `fib_fallback
 the Fibonacci spacing. Confirm and fallback windows equal the whole history, the same windows the
 `full` strategy asks about, so with a shared `--cache` they cost almost no extra API calls.
 
+### AgentDojo-derived families
+
+`agentdojo`, `agentdojo_span` and `agentdojo_benign` (opt-in) use material from AgentDojo (MIT; see
+`THIRD_PARTY_NOTICES.md`): 27 attack goals from its workspace, banking, travel and Slack suites, each
+split into three ordered fragments by the project authors, with AgentDojo's own user-task prompts as the
+task and its environment text (emails, files, calendar entries, messages) as filler. All addresses,
+IBANs and URLs are `.invalid` placeholders and no AgentDojo "important message" wrapper is used.
+`docs/AGENTDOJO_REVIEW.md` lists every attack for review. `agentdojo_benign` builds sessions of
+AgentDojo's benign text only, for the false-positive check.
+
+```bash
+temporalguard eval --families agentdojo --no-twins --per-family 27 --strategies per_message full --by-family
+temporalguard eval --families agentdojo_benign --per-family 40 --strategies per_message full
+```
+
+### Cascade judge (cheap first, strong on flags)
+
+`--judge cascade` runs a cheap judge on every window and a stronger one only on the windows the cheap
+judge flags; the strong verdict replaces the cheap one. Dollars are summed per tier, so `$/out` is
+comparable with single-judge runs. `--max-strong-calls N` caps REAL strong-tier calls (cache hits are
+free), and a run that reaches the cap stops cleanly and resumes from the cache when rerun.
+
+```bash
+temporalguard eval --judge cascade --cheap anthropic:claude-haiku-5-5 --cheap-cache runs/cache_claude.jsonl \
+  --strong anthropic:claude-sonnet-5-5 --strong-cache runs/cache_sonnet.jsonl \
+  --cheap-price 0.10 0.50 --strong-price 2 10 --max-strong-calls 120 \
+  --families referential_span --no-twins --per-family 16 --benign 0 --strategies per_message fib_min3_fallback_confirm full --by-family
+```
+
+### Semantic gate
+
+`SemanticScanner` is a gate that reads meaning: it embeds the newest output (optionally with the one
+before it) and compares it with exemplar sentences describing the kind of instruction an injection
+contains. It runs locally and needs no API credit. `temporalguard gate-calibrate` compares gates
+without any API call: for a range of cutoffs it prints the share of fit fragments, held-out
+fragments, harmless twin text and benign outputs that would be sent to the judge, next to the
+keyword gate. The cutoff is chosen on one set of families and reported on another, because the
+exemplars overlap in topic with the benchmark attacks.
+
+```bash
+pip install "temporalguard[semantic]"          # sentence-transformers; model downloads on first use
+temporalguard gate-calibrate --embedder st     # compare gates, no API calls
+$env:TEMPORALGUARD_GATE_CUTOFF = "0.45"        # then use the cutoff it suggests
+temporalguard eval --judge openai --strategies fib_min3_fallback_confirm_kwgated fib_min3_fallback_confirm_semgated ...
+```
+
+The exemplars come in two sets. GENERIC ones describe attack mechanics (override the task, move something
+to an address, read credentials, act before the user's task, hide it from the user). TOPIC ones name concrete
+actions (payments, deleting files, calendar events, inviting users, security codes, hotels, customer data) and
+were written after reading AgentDojo's attack goals, so results on the AgentDojo-derived set are optimistic.
+`--exemplars generic` (and `$env:TEMPORALGUARD_EXEMPLARS = "generic"` for evaluation runs) leaves the topic
+exemplars out.
+
+`--embedder hashing` (the default for `gate-calibrate`) is a dependency-free character n-gram baseline.
+It captures wording overlap, not meaning. On the benchmark it cannot keep the fragments without
+sending almost every benign output to the judge, so it is a baseline, not a usable gate.
+Strategies: `fib_min3_fallback_confirm_kwgated`, `_semgated`, `_hashgated`, `gated_full_sem`, `gated_full_hash`.
+
+**Cap for a single judge.** `--max-real-calls N` (with `--cache`) stops a single-judge run cleanly before real call N+1; cache hits are free and rerunning the same command continues from the cache. Use it for expensive judges such as a strong-model-only baseline.
+
+**Claude models without forced tool use.** Sonnet 5.5, Opus 5.x, Fable and Mythos reject
+`tool_choice` "tool"/"any" (a 400 error). For them the judge sends `tool_choice` "auto", asks for the
+`record_verdict` call in the system prompt, and sends Sonnet 5.5 `thinking` "between_tools" (its lowest
+setting; thinking tokens are billed as output). If the model answers in text instead of calling the tool,
+the judge passes that text back and asks for the tool call (up to twice), counting the tokens of every
+attempt; a window that still fails reports the stop reason and the model's last text in the error. Models without forced tool use get a 2000-token reply budget (thinking counts against it); an empty reply with `stop_reason=max_tokens` means the budget was exhausted. Haiku 5.5 keeps the
+forced call, and existing cache entries are unaffected. Unit-tested with a fake client, not yet run against the live Sonnet API.
+
+**OpenAI models without `none` effort.** GPT-6.1 Sol and GPT-6 Astra do not accept `none` and cannot
+do function calls on Chat Completions. Give a cascade tier an effort, `--strong openai:gpt-6.1-sol@low`,
+and the judge uses the Responses API for that tier (reasoning tokens are billed as output tokens).
+This path has been unit-tested with a fake client but not run against the live API. The older
+`gpt-6-sol` accepts `none` and works with the original Chat Completions path.
+
 **Early-stop ablation.** `fib_min3` and `pow2_min3` never start below a window of 3, so a judge that is confident about a lone fragment cannot end escalation before seeing any context. Because they are strategies, they are compared with `fib` and `pow2` on the same episodes with paired intervals.
 
 `fib_min3_fallback_confirm` and `pow2_min3_fallback_confirm` combine all three safeguards (first window >= 3, full-history fallback, confirm on flag) and are the candidate final designs.

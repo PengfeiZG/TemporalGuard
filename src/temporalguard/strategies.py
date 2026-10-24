@@ -6,12 +6,15 @@ factors: how much context is inspected (the schedule) and whether a cheap gate s
 
 from __future__ import annotations
 
+import importlib.util
+import os
 from dataclasses import dataclass, replace
 
 from .config import EngineConfig
 from .engine import TemporalGuard
 from .judge.base import Judge
 from .scanner.heuristic import HeuristicScanner, Scanner
+from .scanner.semantic import SemanticScanner, get_embedder
 from .scanner.stateful import StatefulScanner
 from .schedules import (
     Fibonacci,
@@ -29,7 +32,7 @@ class Strategy:
     schedule: WindowSchedule
     gate: bool
     description: str
-    scanner: str = "heuristic"  # "heuristic" or "stateful"
+    scanner: str = "heuristic"  # "heuristic", "stateful", "semantic" or "semantic_hash"
     confirm: bool = False  # EngineConfig.confirm_flags: full-history check after a flag
     min_window: int = 1  # skip schedule windows smaller than this (early-stop ablation)
 
@@ -79,6 +82,36 @@ STRATEGIES: dict[str, Strategy] = {
             True,
             3,
         ),
+        # Gates compared on the final design (keyword gate versus semantic gate).
+        Strategy(
+            "fib_min3_fallback_confirm_kwgated",
+            WithFullFallback(Fibonacci()),
+            True,
+            "final design + keyword gate",
+            "heuristic",
+            True,
+            3,
+        ),
+        Strategy(
+            "fib_min3_fallback_confirm_semgated",
+            WithFullFallback(Fibonacci()),
+            True,
+            "final design + semantic gate (sentence embeddings)",
+            "semantic",
+            True,
+            3,
+        ),
+        Strategy(
+            "fib_min3_fallback_confirm_hashgated",
+            WithFullFallback(Fibonacci()),
+            True,
+            "final design + semantic gate (hashing embedder, no dependencies)",
+            "semantic_hash",
+            True,
+            3,
+        ),
+        Strategy("gated_full_sem", Full(), True, "F + semantic gate", "semantic"),
+        Strategy("gated_full_hash", Full(), True, "F + semantic gate (hashing)", "semantic_hash"),
         Strategy("fib_fallback", WithFullFallback(Fibonacci()), False, "E + final full window"),
         # Controls so that any gain from a full-history safeguard is not credited to Fibonacci.
         Strategy(
@@ -132,11 +165,26 @@ STRATEGIES: dict[str, Strategy] = {
 }
 
 
+def is_available(name: str) -> bool:
+    """False for strategies that need an optional package that is not installed."""
+    kind = STRATEGIES[name].scanner
+    return kind != "semantic" or importlib.util.find_spec("sentence_transformers") is not None
+
+
+def default_strategy_names() -> list[str]:
+    """Strategies to run when none are named: everything whose dependencies are installed."""
+    return [name for name in STRATEGIES if is_available(name)]
+
+
 def make_scanner(kind: str) -> Scanner:
     if kind == "heuristic":
         return HeuristicScanner()
     if kind == "stateful":
         return StatefulScanner()
+    if kind == "semantic_hash":  # dependency-free baseline
+        return SemanticScanner(get_embedder("hashing"))
+    if kind == "semantic":  # real embeddings; model from TEMPORALGUARD_EMBEDDER (default st)
+        return SemanticScanner(get_embedder(os.environ.get("TEMPORALGUARD_EMBEDDER", "st")))
     raise KeyError(f"unknown scanner kind {kind!r}")
 
 

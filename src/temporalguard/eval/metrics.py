@@ -109,6 +109,10 @@ def summarize(results: list[EpisodeResult], price: PriceTable | None = None) -> 
     }
     if price is not None:
         out["cost_usd_total"] = price.cost(usage)
+    elif usage.cost_usd > 0:  # a cascade judge priced each tier itself
+        out["cost_usd_total"] = usage.cost_usd
+    if "cost_usd_total" in out:
+        out["usd_per_output"] = out["cost_usd_total"] / n_out
     return out
 
 

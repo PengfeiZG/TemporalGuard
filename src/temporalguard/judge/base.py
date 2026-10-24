@@ -14,6 +14,14 @@ class JudgeError(RuntimeError):
     """The judge could not produce a verdict (API failure, malformed output, ...)."""
 
 
+class BudgetExceeded(RuntimeError):
+    """Raised before a real API call that would go over a configured call cap.
+
+    It is not a JudgeError on purpose: the engine fails closed on JudgeError and would quietly
+    turn every remaining output into a quarantine, while a run that hits its cap should stop.
+    """
+
+
 class Judge(ABC):
     name: str = "judge"
 

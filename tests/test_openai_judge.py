@@ -135,3 +135,88 @@ def test_reasoning_effort_only_sent_when_configured(monkeypatch):
     client = _ok_client()
     OpenAIJudge(client=client).judge(WINDOW)
     assert client.chat.completions.calls[-1]["reasoning_effort"] == "none"
+
+
+# ----------------------------------------------------------------------------- Responses API path
+class FakeResponses(FakeCompletions):
+    pass
+
+
+def fake_responses_client(**kw):
+    return SimpleNamespace(
+        responses=FakeResponses(**kw),
+        chat=SimpleNamespace(completions=FakeCompletions(error=AssertionError("chat used"))),
+    )
+
+
+def responses_reply(arguments, name="record_verdict", in_tok=200, out_tok=350):
+    item = SimpleNamespace(type="function_call", name=name, arguments=arguments)
+    reasoning = SimpleNamespace(type="reasoning")
+    return SimpleNamespace(
+        output=[reasoning, item],
+        usage=SimpleNamespace(input_tokens=in_tok, output_tokens=out_tok),
+    )
+
+
+def test_real_reasoning_effort_switches_to_the_responses_api():
+    client = fake_responses_client(response=responses_reply(json.dumps(PAYLOAD)))
+    judge = OpenAIJudge(model="m", client=client, reasoning_effort="low")
+    assert judge.uses_responses()
+    result = judge.judge(WINDOW, task="t")
+    call = client.responses.calls[0]
+    assert call["reasoning"] == {"effort": "low"}
+    assert call["tool_choice"] == {"type": "function", "name": "record_verdict"}
+    assert call["tools"][0]["name"] == "record_verdict" and "function" not in call["tools"][0]
+    assert call["input"][0]["role"] == "system" and call["max_output_tokens"] == 2000
+    assert result.malicious and result.fragment_indices == [4, 5]
+    assert (result.usage.input_tokens, result.usage.output_tokens, result.usage.calls) == (
+        200,
+        350,
+        1,
+    )
+
+
+def test_none_or_unset_effort_keeps_the_chat_completions_path(monkeypatch):
+    monkeypatch.delenv("TEMPORALGUARD_OPENAI_API", raising=False)
+    monkeypatch.delenv("TEMPORALGUARD_OPENAI_REASONING_EFFORT", raising=False)
+    for effort in (None, "none"):
+        client = fake_client(response=response([tool_call(json.dumps(PAYLOAD))]))
+        judge = OpenAIJudge(client=client, reasoning_effort=effort)
+        assert not judge.uses_responses()
+        judge.judge(WINDOW)
+        assert client.chat.completions.calls
+
+
+def test_api_can_be_forced_and_is_validated(monkeypatch):
+    monkeypatch.delenv("TEMPORALGUARD_OPENAI_REASONING_EFFORT", raising=False)
+    assert OpenAIJudge(client=object(), api="responses").uses_responses()
+    assert not OpenAIJudge(client=object(), api="chat", reasoning_effort="low").uses_responses()
+    monkeypatch.setenv("TEMPORALGUARD_OPENAI_API", "responses")
+    assert OpenAIJudge(client=object()).uses_responses()
+    with pytest.raises(ValueError):
+        OpenAIJudge(client=object(), api="nope")
+
+
+def test_responses_errors_become_judge_errors():
+    judge = OpenAIJudge(
+        client=fake_responses_client(error=RuntimeError("429")), reasoning_effort="low"
+    )
+    with pytest.raises(JudgeError, match="OpenAI API call failed"):
+        judge.judge(WINDOW)
+    empty = SimpleNamespace(output=[SimpleNamespace(type="reasoning")], usage=None)
+    judge = OpenAIJudge(client=fake_responses_client(response=empty), reasoning_effort="low")
+    with pytest.raises(JudgeError, match="no record_verdict"):
+        judge.judge(WINDOW)
+    bad = responses_reply("not json")
+    judge = OpenAIJudge(client=fake_responses_client(response=bad), reasoning_effort="low")
+    with pytest.raises(JudgeError, match="not valid JSON"):
+        judge.judge(WINDOW)
+
+
+def test_tier_spec_parsing_for_the_cascade_cli():
+    from temporalguard.cli import parse_tier_spec
+
+    assert parse_tier_spec("openai:gpt-6.1-sol@low") == ("openai", "gpt-6.1-sol", "low")
+    assert parse_tier_spec("anthropic:claude-haiku-5-5") == ("anthropic", "claude-haiku-5-5", None)
+    assert parse_tier_spec("openai:") == ("openai", None, None)
+    assert parse_tier_spec("mock") == ("mock", None, None)

@@ -7,7 +7,7 @@ from temporalguard.judge.base import Judge, JudgeError
 from temporalguard.models import JudgeResult, ToolOutput, Usage, Verdict
 from temporalguard.scanner import HeuristicScanner
 from temporalguard.schedules import Fibonacci, Full
-from temporalguard.strategies import STRATEGIES, build_guard
+from temporalguard.strategies import build_guard, default_strategy_names
 
 
 class ScriptedJudge(Judge):
@@ -153,7 +153,7 @@ def test_config_validation():
 
 
 def test_strategy_registry_builds_every_guard():
-    for name in STRATEGIES:
+    for name in default_strategy_names():  # skips ones needing sentence-transformers
         assert build_guard(name, CompositionMockJudge()) is not None
     with pytest.raises(KeyError):
         build_guard("nope", CompositionMockJudge())

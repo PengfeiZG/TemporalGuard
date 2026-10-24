@@ -27,6 +27,7 @@ COLUMNS = [
     ("judge_calls_per_output", "calls/out"),
     ("tokens_per_output", "tok/out"),
     ("tokens_ci", "tok/out 95% CI"),
+    ("usd_per_output", "$/out"),
     ("context_per_output", "ctx/out"),
 ]
 
@@ -34,6 +35,8 @@ COLUMNS = [
 def _fmt(value: object) -> str:
     if isinstance(value, tuple):
         return "[" + ", ".join(_fmt(v) for v in value) + "]"
+    if isinstance(value, float) and 0 < abs(value) < 0.01:
+        return f"{value:.5f}"
     if isinstance(value, float):
         return (
             "n/a" if math.isnan(value) else f"{value:.2f}" if abs(value) < 100 else f"{value:.0f}"
