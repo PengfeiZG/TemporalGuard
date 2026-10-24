@@ -22,6 +22,10 @@ class EngineConfig:
         judge's label, "quarantine" fails closed, "allow" fails open.
     on_error: what to do when the judge fails: "quarantine" (default, fail closed) or "allow".
     max_chars_per_output: per-output truncation before text is sent to the judge.
+    confirm_flags: after a malicious verdict from a window smaller than the whole history, make
+        one extra judge call over the full history and merge the fragments it names. The verdict
+        is never changed, so detection is unaffected; the point is to find older fragments (the
+        root of the attack) that a small window cannot see. Costs one call per flagged output.
     min_window: skip schedule windows smaller than this (if none are large enough, only the
         largest is used). Guards against a confident-benign verdict on a lone fragment ending
         escalation too early; 1 keeps the schedule unchanged.
@@ -36,6 +40,7 @@ class EngineConfig:
     on_error: str = "quarantine"
     max_chars_per_output: int = 4000
     min_window: int = 1
+    confirm_flags: bool = False
 
     def __post_init__(self) -> None:
         for name in (

@@ -115,7 +115,28 @@ class TemporalGuard:
         decision.reconstructed_instruction = last.reconstructed_instruction
         decision.explanation = last.rationale
         decision.verdict = self._verdict(last, confident)
+        if cfg.confirm_flags and decision.verdict.flagged and decision.windows_examined[-1] < n:
+            self._confirm(decision, n)
         return decision
+
+    def _confirm(self, decision: Decision, n: int) -> None:
+        """One extra full-history call after a flag, to find fragments outside the small window.
+
+        Never changes the verdict. A failed call is ignored (the original flag stands), and a
+        full-history call that finds nothing leaves the original fragments untouched.
+        """
+        try:
+            result = self.judge.judge(self._window(n), self.task)
+        except JudgeError:
+            return
+        decision.usage.add(result.usage)
+        decision.windows_examined.append(n)
+        decision.judge_results.append(result)
+        if result.malicious:
+            merged = set(decision.fragment_indices) | set(result.fragment_indices)
+            decision.fragment_indices = sorted(merged)
+            if result.reconstructed_instruction:
+                decision.reconstructed_instruction = result.reconstructed_instruction
 
     def _verdict(self, result: JudgeResult, confident: bool) -> Verdict:
         cfg = self.config

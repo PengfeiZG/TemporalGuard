@@ -115,3 +115,23 @@ def test_missing_usage_defaults_to_zero():
     resp.usage = None
     result = OpenAIJudge(client=fake_client(response=resp)).judge(WINDOW)
     assert result.usage.input_tokens == 0 and result.usage.output_tokens == 0
+
+
+def _ok_client():
+    return fake_client(response=response([tool_call(json.dumps(PAYLOAD))]))
+
+
+def test_reasoning_effort_only_sent_when_configured(monkeypatch):
+    monkeypatch.delenv("TEMPORALGUARD_OPENAI_REASONING_EFFORT", raising=False)
+    client = _ok_client()
+    OpenAIJudge(client=client).judge(WINDOW)
+    assert "reasoning_effort" not in client.chat.completions.calls[-1]
+
+    client = _ok_client()
+    OpenAIJudge(client=client, reasoning_effort="none").judge(WINDOW)
+    assert client.chat.completions.calls[-1]["reasoning_effort"] == "none"
+
+    monkeypatch.setenv("TEMPORALGUARD_OPENAI_REASONING_EFFORT", "none")
+    client = _ok_client()
+    OpenAIJudge(client=client).judge(WINDOW)
+    assert client.chat.completions.calls[-1]["reasoning_effort"] == "none"

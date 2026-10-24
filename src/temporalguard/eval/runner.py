@@ -9,11 +9,18 @@ from ..cost import PriceTable
 from ..judge.base import Judge
 from ..strategies import STRATEGIES, build_guard
 from .episodes import Episode, adaptive_suite
-from .metrics import EpisodeResult, summarize, summarize_by_family
+from .metrics import (
+    EpisodeResult,
+    false_alarm_by_family,
+    pair_accuracy,
+    summarize,
+    summarize_by_family,
+)
 from .stats import bootstrap_ci
 
 CI_METRICS = {
     "recall": "recall_ci",
+    "root_recall": "root_ci",
     "fpr_output": "fpr_ci",
     "tokens_per_output": "tokens_ci",
 }
@@ -69,6 +76,19 @@ def family_rows(all_results: dict[str, list[EpisodeResult]], metric: str = "reca
         per_family = summarize_by_family(results)
         rows.append({"strategy": name, **{fam: s[metric] for fam, s in per_family.items()}})
     return rows
+
+
+def benign_family_rows(all_results: dict[str, list[EpisodeResult]]) -> list[dict]:
+    """One row per strategy: share of benign sessions with any flag, per benign family."""
+    return [
+        {"strategy": name, **false_alarm_by_family(results)}
+        for name, results in all_results.items()
+    ]
+
+
+def pair_rows(all_results: dict[str, list[EpisodeResult]]) -> list[dict]:
+    """One row per strategy: share of attack/twin pairs handled correctly, per family."""
+    return [{"strategy": name, **pair_accuracy(results)} for name, results in all_results.items()]
 
 
 def compare(

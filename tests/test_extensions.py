@@ -17,8 +17,22 @@ from temporalguard.eval import (
     summarize,
     summarize_by_family,
 )
-from temporalguard.eval.episodes import FAMILY_SPECS, adaptive_positions, placement
-from temporalguard.eval.fixtures import BENIGN_LOOKALIKES, FRAGMENT_SETS, PARAPHRASED_SETS
+from temporalguard.eval.episodes import (
+    DEFAULT_FAMILIES,
+    FAMILY_SPECS,
+    adaptive_positions,
+    make_twin,
+    placement,
+)
+from temporalguard.eval.fixtures import (
+    BENIGN_LOOKALIKES,
+    DEFINITIONAL_SETS,
+    DEPENDENT_SETS,
+    FRAGMENT_SETS,
+    PARAPHRASED_SETS,
+    REFERENTIAL_SETS,
+)
+from temporalguard.eval.metrics import false_alarm_by_family, pair_accuracy
 from temporalguard.judge import CachingJudge, CompositionMockJudge
 from temporalguard.judge.base import Judge, JudgeError
 from temporalguard.models import JudgeResult, ToolOutput, Usage
@@ -271,7 +285,7 @@ def test_paired_difference_detects_a_real_gap_and_validates_alignment():
 def test_summarize_by_family_splits_attack_families_only():
     suite = build_suite(seed=0, per_family=2, benign=3)
     by_family = summarize_by_family(run_strategy("fib", CompositionMockJudge(), suite))
-    assert set(by_family) == set(FAMILY_SPECS) and "benign" not in by_family
+    assert set(by_family) == set(DEFAULT_FAMILIES) and "benign" not in by_family
     assert by_family["adjacent"]["recall"] == 1.0
 
 
@@ -300,3 +314,292 @@ def test_cli_eval_adaptive_and_bad_family(capsys):
     assert main(["eval", "--adaptive", "--strategies", "fib", "fib_fallback"]) == 0
     assert "schedule-aware attacker" in capsys.readouterr().out
     assert main(["eval", "--families", "bogus"]) == 2
+
+
+class AlwaysFailingJudge(Judge):
+    def judge(self, window, task=None):
+        raise JudgeError("rate limited")
+
+
+def test_judge_error_rate_is_reported_and_inflates_flags():
+    suite = build_suite(seed=0, per_family=1, benign=2, families=["adjacent"])
+    s = summarize(run_strategy("per_message", AlwaysFailingJudge(), suite))
+    assert s["judge_error_rate"] == 1.0
+    assert s["fpr_output"] == 1.0  # errors fail closed, so every benign output looks flagged
+    ok = summarize(run_strategy("per_message", CompositionMockJudge(), suite))
+    assert ok["judge_error_rate"] == 0.0
+
+
+def test_cli_warns_when_judge_calls_fail(capsys, monkeypatch):
+    import temporalguard.cli as cli
+
+    monkeypatch.setattr(cli, "_make_judge", lambda *a, **k: AlwaysFailingJudge())
+    assert main(["eval", "--strategies", "fib", "--per-family", "1", "--benign", "1"]) == 0
+    assert "WARNING: judge calls failed" in capsys.readouterr().err
+
+
+# ----------------------------------------------------------------------------- dependent / twins
+BANNED = [
+    "ignore",
+    "disregard",
+    "override",
+    "password",
+    "token",
+    "exfiltrate",
+    "transmit",
+    "api key",
+]
+
+
+def test_dependent_sets_are_matched_twins_that_differ_only_in_the_middle():
+    assert len(DEPENDENT_SETS) >= 3
+    for name, pair in DEPENDENT_SETS.items():
+        a, b = pair["attack"], pair["benign"]
+        assert len(a) == len(b) == 3, name
+        assert a[0] == b[0] and a[-1] == b[-1], name
+        assert a[1] != b[1], name
+
+
+def test_dependent_fragments_avoid_stock_trigger_words():
+    for pair in DEPENDENT_SETS.values():
+        for text in pair["attack"] + pair["benign"]:
+            assert not any(w in text.lower() for w in BANNED), text
+
+
+def test_dependent_families_are_opt_in_and_do_not_change_the_default_suite():
+    assert "dependent" in FAMILY_SPECS and "dependent" not in DEFAULT_FAMILIES
+    default = build_suite(seed=0)
+    assert not any(e.family.startswith("dependent") for e in default)
+    assert [e.id for e in default] == [e.id for e in build_suite(seed=0, families=DEFAULT_FAMILIES)]
+
+
+def test_every_dependent_attack_has_one_identical_benign_twin():
+    suite = build_suite(seed=3, per_family=4, benign=0, families=["dependent", "dependent_span"])
+    attacks = [e for e in suite if e.is_attack]
+    twins = {e.id: e for e in suite if not e.is_attack}
+    assert len(attacks) == len(twins) == 8
+    for atk in attacks:
+        twin = twins[atk.id.replace(atk.family, atk.family + "_twin", 1)]
+        assert twin.family == atk.family + "_twin" and twin.attack_indices == []
+        assert len(twin.outputs) == len(atk.outputs)
+        diff = [i for i, (x, y) in enumerate(zip(atk.outputs, twin.outputs, strict=True)) if x != y]
+        assert len(diff) == 1 and diff[0] == atk.attack_indices[1]  # only the middle fragment
+        assert all(t == a for (t, _), (a, _) in zip(twin.outputs, atk.outputs, strict=True))
+
+
+def test_dependent_span_exceeds_every_escalating_window():
+    suite = build_suite(seed=1, per_family=4, benign=0, families=["dependent_span"])
+    assert all(e.attack_span >= 20 for e in suite if e.is_attack)
+
+
+def test_make_twin_validates_fragment_count():
+    atk = build_suite(seed=0, per_family=1, benign=0, families=["dependent"])[0]
+    with pytest.raises(ValueError):
+        make_twin(atk, ["only one"], "x")
+
+
+def test_false_alarm_by_family_reports_twin_families_separately():
+    suite = build_suite(seed=0, per_family=2, benign=3, families=["dependent"])
+    res = run_strategy("per_message", CompositionMockJudge(), suite)
+    fa = false_alarm_by_family(res)
+    assert set(fa) == {"benign", "dependent_twin"}
+    assert all(0.0 <= v <= 1.0 for v in fa.values())
+
+
+def test_cli_by_family_prints_false_alarm_table_for_twin_families(capsys):
+    argv = ["eval", "--families", "dependent", "--strategies", "per_message", "full",
+            "--per-family", "2", "--benign", "2", "--by-family"]  # fmt: skip
+    assert main(argv) == 0
+    out = capsys.readouterr().out
+    assert "false-alarm rate by benign family" in out and "dependent_twin" in out
+
+
+def test_definitional_sets_differ_only_in_the_defining_fragment_and_carry_a_task():
+    assert len(DEFINITIONAL_SETS) >= 3
+    for name, spec in DEFINITIONAL_SETS.items():
+        a, b = spec["attack"], spec["benign"]
+        assert len(a) == len(b) == 3 and spec["task"], name
+        assert a[0] != b[0] and a[1:] == b[1:], name
+
+
+def test_definitional_fragments_are_declarative_and_avoid_trigger_words():
+    imperative_openers = (
+        "ignore",
+        "disregard",
+        "send ",
+        "forward ",
+        "email ",
+        "upload ",
+        "collect ",
+    )
+    for spec in DEFINITIONAL_SETS.values():
+        for text in spec["attack"] + spec["benign"]:
+            low = text.lower()
+            assert not any(w in low for w in BANNED), text
+            assert not low.startswith(imperative_openers), text
+
+
+def test_definitional_episodes_use_the_user_task_and_have_matched_twins():
+    suite = build_suite(
+        seed=2, per_family=4, benign=0, families=["definitional", "definitional_span"]
+    )
+    attacks = [e for e in suite if e.is_attack]
+    twins = {e.id: e for e in suite if not e.is_attack}
+    assert len(attacks) == len(twins) == 8
+    tasks = {s["task"] for s in DEFINITIONAL_SETS.values()}
+    for atk in attacks:
+        twin = twins[atk.id.replace(atk.family, atk.family + "_twin", 1)]
+        assert atk.task in tasks and twin.task == atk.task
+        diff = [i for i, (x, y) in enumerate(zip(atk.outputs, twin.outputs, strict=True)) if x != y]
+        assert diff == [atk.attack_indices[0]]  # only the defining fragment differs
+
+
+def test_definitional_families_are_opt_in():
+    assert "definitional" in FAMILY_SPECS and "definitional" not in DEFAULT_FAMILIES
+
+
+class _FlagAll(Judge):
+    def judge(self, window, task=None):
+        return JudgeResult(
+            True, 0.99, fragment_indices=[w.index for w in window], usage=Usage(1, 1, 1)
+        )
+
+
+class _FlagNone(Judge):
+    def judge(self, window, task=None):
+        return JudgeResult(False, 0.99, usage=Usage(1, 1, 1))
+
+
+def test_pair_accuracy_is_zero_for_flag_everything_and_flag_nothing():
+    suite = build_suite(seed=0, per_family=2, benign=0, families=["definitional"])
+    everything = pair_accuracy(run_strategy("per_message", _FlagAll(), suite))
+    nothing = pair_accuracy(run_strategy("per_message", _FlagNone(), suite))
+    assert everything["definitional"] == 0.0 and everything["all pairs"] == 0.0
+    assert nothing["definitional"] == 0.0 and nothing["all pairs"] == 0.0
+
+
+def test_pair_accuracy_skips_families_without_twins():
+    suite = build_suite(seed=0, per_family=2, benign=0, families=["adjacent"])
+    assert pair_accuracy(run_strategy("per_message", CompositionMockJudge(), suite)) == {}
+
+
+def test_cli_prints_pair_accuracy_for_twin_families(capsys):
+    argv = ["eval", "--families", "definitional", "--strategies", "per_message", "full",
+            "--per-family", "2", "--benign", "1", "--by-family"]  # fmt: skip
+    assert main(argv) == 0
+    assert "twin-pair accuracy" in capsys.readouterr().out
+
+
+def test_dump_decisions_writes_reasoning_for_flagged_outputs(tmp_path):
+    import json
+
+    from temporalguard.eval.report import dump_decisions
+
+    suite = build_suite(seed=0, per_family=1, benign=1, families=["adjacent"])
+    results = run_many(CompositionMockJudge(), suite, ["full"])
+    path = tmp_path / "d.jsonl"
+    n = dump_decisions(results, path)
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert n == len(rows) == len(suite)
+    attack = next(r for r in rows if r["is_attack"])
+    flagged = [d for d in attack["decisions"] if d["verdict"] != "allow"]
+    assert flagged and all(d["text"] for d in flagged)
+    assert all(d["explanation"] is not None for d in attack["decisions"])
+
+
+def test_cli_dump_flag(tmp_path, capsys):
+    out = tmp_path / "d.jsonl"
+    argv = ["eval", "--strategies", "fib", "--per-family", "1", "--benign", "1", "--dump", str(out)]
+    assert main(argv) == 0
+    assert out.exists() and out.read_text(encoding="utf-8").strip()
+
+
+def test_referential_sets_differ_only_in_the_naming_fragment_and_name_no_payload():
+    assert len(REFERENTIAL_SETS) >= 3
+    for name, spec in REFERENTIAL_SETS.items():
+        a, b = spec["attack"], spec["benign"]
+        assert len(a) == len(b) == 3 and spec["task"], name
+        assert a[0] != b[0] and a[1:] == b[1:], name
+        assert "earlier note" in a[1], name  # the directive points back instead of naming the file
+        for text in a + b:
+            assert not any(w in text.lower() for w in BANNED), text
+
+
+def test_referential_benign_file_is_what_the_task_asks_for():
+    # in each twin the named file is the thing the user's task is about
+    cues = {
+        "status_report": "status-report",
+        "quarterly_summary": "quarterly-summary",
+        "release_notes": "release-notes",
+        "meeting_agenda": "meeting-agenda",
+    }
+    for name, cue in cues.items():
+        assert cue in REFERENTIAL_SETS[name]["benign"][0]
+        assert cue not in REFERENTIAL_SETS[name]["attack"][0]
+
+
+def test_referential_families_are_opt_in_and_build_matched_twins():
+    assert "referential" in FAMILY_SPECS and "referential" not in DEFAULT_FAMILIES
+    suite = build_suite(
+        seed=4, per_family=4, benign=0, families=["referential", "referential_span"]
+    )
+    attacks = [e for e in suite if e.is_attack]
+    twins = {e.id: e for e in suite if not e.is_attack}
+    assert len(attacks) == len(twins) == 8
+    for atk in attacks:
+        twin = twins[atk.id.replace(atk.family, atk.family + "_twin", 1)]
+        assert twin.task == atk.task
+        diff = [i for i, (x, y) in enumerate(zip(atk.outputs, twin.outputs, strict=True)) if x != y]
+        assert diff == [atk.attack_indices[0]]
+
+
+def test_root_recall_exposes_the_blind_spot_that_recall_hides():
+    judge = CompositionMockJudge()
+    suite = adaptive_suite(Fixed(5), seed=0)  # oldest fragment sits outside a 5-output window
+    fixed = summarize(run_strategy("fixed5", judge, suite))
+    full = summarize(run_strategy("full", judge, suite))
+    assert fixed["recall"] > 0 and fixed["root_recall"] < fixed["recall"]
+    assert full["root_recall"] == 1.0
+
+
+def test_root_recall_is_reported_in_cli(capsys):
+    argv = [
+        "eval",
+        "--strategies",
+        "fixed5",
+        "full",
+        "--per-family",
+        "2",
+        "--benign",
+        "1",
+        "--by-family",
+    ]
+    assert main(argv) == 0
+    assert "root-fragment recall by attack family" in capsys.readouterr().out
+
+
+def test_root_recall_bootstrap_matches_summary_and_supports_paired_differences():
+    judge = CompositionMockJudge()
+    suite = adaptive_suite(Fixed(5), seed=0)
+    fixed = run_strategy("fixed5", judge, suite)
+    full = run_strategy("full", judge, suite)
+    est, lo, hi = bootstrap_ci(fixed, "root_recall", n_boot=100)
+    assert est == pytest.approx(summarize(fixed)["root_recall"]) and lo <= est <= hi
+    d, dlo, dhi = paired_difference(full, fixed, "root_recall", n_boot=100)
+    assert d > 0 and dlo <= d <= dhi
+
+
+def test_no_twins_option_removes_twin_episodes_only():
+    both = build_suite(seed=0, per_family=2, benign=0, families=["referential"])
+    attacks_only = build_suite(
+        seed=0, per_family=2, benign=0, families=["referential"], twins=False
+    )
+    assert len(both) == 4 and len(attacks_only) == 2
+    assert [e.outputs for e in attacks_only] == [e.outputs for e in both if e.is_attack]
+
+
+def test_cli_no_twins_flag(capsys):
+    argv = ["eval", "--families", "referential", "--strategies", "per_message", "--per-family", "2",
+            "--benign", "0", "--no-twins", "--by-family"]  # fmt: skip
+    assert main(argv) == 0
+    assert "twin-pair accuracy" not in capsys.readouterr().out

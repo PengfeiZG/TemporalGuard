@@ -11,13 +11,21 @@ from .config import EngineConfig
 from .cost import PriceTable
 from .eval.episodes import FAMILY_SPECS, build_suite, episodes_from_json, episodes_to_json
 from .eval.report import (
+    dump_decisions,
     family_markdown,
     paired_markdown,
     to_csv,
     to_json,
     to_markdown,
 )
-from .eval.runner import compare_adaptive, family_rows, rows_from_results, run_many
+from .eval.runner import (
+    benign_family_rows,
+    compare_adaptive,
+    family_rows,
+    pair_rows,
+    rows_from_results,
+    run_many,
+)
 from .eval.stats import paired_difference
 from .judge.base import Judge
 from .judge.cache import CachingJudge
@@ -94,20 +102,50 @@ def cmd_demo(args: argparse.Namespace) -> int:
 
 
 def cmd_make_suite(args: argparse.Namespace) -> int:
-    episodes = build_suite(args.seed, args.per_family, args.benign, args.families)
+    episodes = build_suite(
+        args.seed, args.per_family, args.benign, args.families, twins=not args.no_twins
+    )
     Path(args.out).write_text(episodes_to_json(episodes))
     print(f"wrote {len(episodes)} episodes to {args.out}")
     return 0
 
 
 PAIRS = [
+    # does the Fibonacci spacing matter, holding the safeguard fixed?
     ("fib", "pow2"),
     ("fib", "fixed5"),
+    ("fib_fallback", "pow2_fallback"),
+    ("fib_fallback", "fixed5_fallback"),
+    ("pow2_fallback", "fixed5_fallback"),
+    ("fib_confirm", "pow2_confirm"),
+    ("fib_confirm", "fixed5_confirm"),
+    ("fib_fallback_confirm", "pow2_fallback_confirm"),
+    ("fib_fallback_confirm", "fixed5_fallback_confirm"),
+    # what do the safeguards add, and what do they cost against full history?
+    ("fib_fallback", "fib"),
+    ("fib_confirm", "fib"),
+    ("fib_fallback_confirm", "fib"),
     ("fib", "full"),
+    ("fib_fallback", "full"),
+    ("fib_confirm", "full"),
+    ("fib_fallback_confirm", "full"),
+    ("pow2_fallback_confirm", "full"),
+    ("fixed5_fallback", "full"),
+    # early-stop ablation: does starting at a window of 3 help?
+    ("fib_min3", "fib"),
+    ("pow2_min3", "pow2"),
+    ("fib_min3", "full"),
+    ("fib_min3", "fib_confirm"),
+    # candidate final designs
+    ("fib_min3_fallback_confirm", "full"),
+    ("pow2_min3_fallback_confirm", "full"),
+    ("fib_min3_fallback_confirm", "pow2_min3_fallback_confirm"),
+    ("fib_min3_fallback_confirm", "fixed5_fallback_confirm"),
+    ("pow2_min3_fallback_confirm", "fixed5_fallback_confirm"),
+    # gates
     ("fib_gated", "pow2_gated"),
     ("fib_gated", "gated_full"),
     ("fib_stateful", "fib_gated"),
-    ("fib_fallback", "fib"),
 ]
 
 
@@ -121,7 +159,9 @@ def cmd_eval(args: argparse.Namespace) -> int:
         if args.suite:
             episodes = episodes_from_json(Path(args.suite).read_text())
         else:
-            episodes = build_suite(args.seed, args.per_family, args.benign, args.families)
+            episodes = build_suite(
+                args.seed, args.per_family, args.benign, args.families, twins=not args.no_twins
+            )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -142,6 +182,9 @@ def cmd_eval(args: argparse.Namespace) -> int:
         return 0
 
     all_results = run_many(judge, episodes, args.strategies, config)
+    if args.dump:
+        n = dump_decisions(all_results, args.dump)
+        print(f"wrote {n} episode records with judge reasoning to {args.dump}", file=sys.stderr)
     rows = rows_from_results(all_results, price, ci=args.ci, n_boot=args.boot, seed=args.seed)
 
     render = {"markdown": to_markdown, "csv": to_csv, "json": to_json}[args.format]
@@ -151,11 +194,21 @@ def cmd_eval(args: argparse.Namespace) -> int:
         text += "\n\nfragment recall by attack family\n" + family_markdown(
             family_rows(all_results, "fragment_recall")
         )
+        text += "\n\nroot-fragment recall by attack family (was the oldest fragment found?)\n"
+        text += family_markdown(family_rows(all_results, "root_recall"))
+        benign_rows = benign_family_rows(all_results)
+        if any(len(r) > 1 for r in benign_rows):
+            text += "\n\nfalse-alarm rate by benign family (share of sessions with any flag)\n"
+            text += family_markdown(benign_rows)
+        pairs = pair_rows(all_results)
+        if any(len(r) > 1 for r in pairs):
+            text += "\n\ntwin-pair accuracy (attack caught AND its benign twin not flagged)\n"
+            text += family_markdown(pairs)
     if args.ci and args.format == "markdown":
         paired = []
         for a, b in PAIRS:
             if a in all_results and b in all_results:
-                for metric in ("recall", "tokens_per_output"):
+                for metric in ("recall", "root_recall", "tokens_per_output"):
                     d, lo, hi = paired_difference(
                         all_results[a], all_results[b], metric, n_boot=args.boot, seed=args.seed
                     )
@@ -219,6 +272,9 @@ def build_parser() -> argparse.ArgumentParser:
         q.add_argument(
             "--families", nargs="+", help=f"attack families, subset of {sorted(FAMILY_SPECS)}"
         )
+        q.add_argument(
+            "--no-twins", action="store_true", help="omit benign twins (cheaper attack-only runs)"
+        )
 
     p = sub.add_parser("make-suite", help="write a reproducible episode suite to JSON")
     add_suite_args(p)
@@ -235,6 +291,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--price-in", type=float, help="USD per million input tokens")
     p.add_argument("--price-out", type=float, help="USD per million output tokens")
     p.add_argument("--ci", action="store_true", help="bootstrap CIs and paired differences")
+    p.add_argument(
+        "--dump", default=None, help="write per-episode judge reasoning to this JSONL file"
+    )
     p.add_argument("--boot", type=int, default=1000, help="bootstrap resamples")
     p.add_argument("--by-family", action="store_true", help="also print recall per attack family")
     p.add_argument("--adaptive", action="store_true", help="run the schedule-aware attacker")

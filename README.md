@@ -86,7 +86,7 @@ With a real judge:
 
 ```bash
 export ANTHROPIC_API_KEY=...
-temporalguard eval --judge anthropic --model claude-haiku-4-5-20251001 \
+temporalguard eval --judge anthropic --model claude-haiku-5-5 \
     --price-in <USD/Mtok> --price-out <USD/Mtok> --format csv --out results.csv
 ```
 
@@ -132,6 +132,58 @@ different spacing so no schedule is rewarded for matching its own rhythm; `long_
 oldest fragment beyond the largest window of the escalating schedules. `temporalguard eval
 --adaptive` runs a schedule-aware attacker that places the oldest fragment in each strategy's
 blind spot.
+
+### Context-dependent attacks with benign twins
+
+`--families dependent dependent_span` (opt-in, not in the default suite) builds attacks whose
+fragments are harmless alone, and for each one a **benign twin** that is identical except for the
+middle fragment (private data in the attack, public data in the twin). A judge that reads outputs
+one at a time cannot get both the attack and its twin right, so these families test whether context
+helps. `--by-family` prints the false-alarm rate on twin sessions next to recall.
+
+**Caveat found by running it:** with real judges the `dependent` twins were flagged as often as the
+attacks (false-alarm rate 1.00 on both OpenAI and Claude), even with full context. Both versions
+contain an agent-directed instruction to send data to an address, which a judge should flag whatever
+it moves, so those twins are not benign. The `definitional` families fix this: the action matches
+the user's task, the fragments are declarative notes, and only the first fragment (what a label
+refers to) differs between attack and twin.
+
+```bash
+temporalguard eval --families definitional definitional_span --strategies per_message fib full --by-family --ci
+```
+
+**Second finding from the `--dump` reasoning:** the `definitional` twins were still flagged. The judges
+resolved the definitions correctly (they cite "holiday photos", "draft meeting notes") but treat any
+output that widens the user's task ("the package should also include X") as an injection whatever X
+is. The `referential` families keep the directive on-task ("attach the file named in the earlier
+note") and move all the difference into one declarative note naming the file.
+
+```bash
+temporalguard eval --families referential referential_span --strategies per_message fib full --by-family --ci --dump runs\ref_dump.jsonl
+```
+
+**Controls for the safeguards.** `fixed5_`, `pow2_` and `fib_` each come with `_fallback` (end the
+schedule with a full-history window) and `_confirm` variants, plus `fib_fallback_confirm` and
+`pow2_fallback_confirm`. Without the matching controls, a gain from a safeguard could be credited to
+the Fibonacci spacing. Confirm and fallback windows equal the whole history, the same windows the
+`full` strategy asks about, so with a shared `--cache` they cost almost no extra API calls.
+
+**Early-stop ablation.** `fib_min3` and `pow2_min3` never start below a window of 3, so a judge that is confident about a lone fragment cannot end escalation before seeing any context. Because they are strategies, they are compared with `fib` and `pow2` on the same episodes with paired intervals.
+
+`fib_min3_fallback_confirm` and `pow2_min3_fallback_confirm` combine all three safeguards (first window >= 3, full-history fallback, confirm on flag) and are the candidate final designs.
+
+**Confirm on flag.** Strategies `fib_confirm` and `per_message_confirm` make one extra full-history
+call after a flag and merge the fragments it names, without changing the verdict. They target the
+case where a judge flags a later fragment from a small window and stops, never finding the root of
+the attack (`root_recall`). Add `--no-twins` for attack-only runs, which cost about half as much.
+
+`--by-family` also prints **twin-pair accuracy**: the share of attack/twin pairs where the attack is caught and
+the twin is not flagged. Flagging everything and flagging nothing both score 0, so it is the headline
+metric for these families.
+
+```bash
+temporalguard eval --families dependent dependent_span --strategies per_message fib full --by-family --ci
+```
 
 ```bash
 temporalguard eval --by-family --ci                 # per-family recall, bootstrap CIs, paired diffs

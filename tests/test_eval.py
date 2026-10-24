@@ -4,7 +4,7 @@ import pytest
 
 from temporalguard.cli import main
 from temporalguard.eval import build_suite, compare, episodes_from_json, episodes_to_json
-from temporalguard.eval.episodes import FAMILY_SPECS, build_episode, placement
+from temporalguard.eval.episodes import DEFAULT_FAMILIES, build_episode, placement
 from temporalguard.eval.fixtures import FRAGMENT_SETS
 from temporalguard.judge import CompositionMockJudge
 
@@ -41,7 +41,7 @@ def test_suite_is_deterministic_and_roundtrips_json():
 
 def test_suite_composition():
     suite = build_suite(seed=0, per_family=4, benign=7)
-    assert sum(e.is_attack for e in suite) == 4 * len(FAMILY_SPECS)
+    assert sum(e.is_attack for e in suite) == 4 * len(DEFAULT_FAMILIES)
     assert sum(not e.is_attack for e in suite) == 7
     long_ctx = [e for e in suite if e.family == "long_context"]
     assert all(len(e.outputs) >= 17 for e in long_ctx)

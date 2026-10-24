@@ -6,12 +6,17 @@ import csv
 import io
 import json
 import math
+from pathlib import Path
+
+from .metrics import EpisodeResult
 
 COLUMNS = [
     ("strategy", "strategy"),
     ("recall", "recall"),
     ("recall_ci", "recall 95% CI"),
     ("fragment_recall", "frag_rec"),
+    ("root_recall", "root_rec"),
+    ("root_ci", "root 95% CI"),
     ("contained_early", "early"),
     ("precision", "prec"),
     ("fpr_output", "fpr"),
@@ -93,3 +98,49 @@ def to_csv(rows: list[dict]) -> str:
 
 def to_json(rows: list[dict]) -> str:
     return json.dumps(rows, indent=2, default=str)
+
+
+def dump_decisions(all_results: dict[str, list[EpisodeResult]], path: str | Path) -> int:
+    """Write one JSON line per (strategy, episode) with the judge's reasoning, for diagnosis.
+
+    Output text is included only for flagged outputs and true fragments, to keep files small.
+    Use it to see WHY a twin was flagged or an attack missed. Returns the number of lines written.
+    """
+    n = 0
+    with Path(path).open("w", encoding="utf-8") as fh:
+        for strategy, results in all_results.items():
+            for r in results:
+                ep = r.episode
+                truth = set(ep.attack_indices)
+                decisions = []
+                for d in r.decisions:
+                    keep_text = d.verdict.flagged or d.output_index in truth
+                    decisions.append(
+                        {
+                            "output_index": d.output_index,
+                            "is_fragment": d.output_index in truth,
+                            "verdict": d.verdict.value,
+                            "stage": d.stage,
+                            "risk_score": round(d.risk_score, 3),
+                            "windows_examined": d.windows_examined,
+                            "fragment_indices": d.fragment_indices,
+                            "explanation": d.explanation,
+                            "text": ep.outputs[d.output_index][1] if keep_text else None,
+                        }
+                    )
+                fh.write(
+                    json.dumps(
+                        {
+                            "strategy": strategy,
+                            "episode_id": ep.id,
+                            "family": ep.family,
+                            "is_attack": ep.is_attack,
+                            "task": ep.task,
+                            "attack_indices": ep.attack_indices,
+                            "decisions": decisions,
+                        }
+                    )
+                    + "\n"
+                )
+                n += 1
+    return n
