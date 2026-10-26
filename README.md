@@ -11,10 +11,11 @@ judge whether the outputs *together* form an instruction aimed at the agent. To 
 affordable it starts with a small window of recent outputs and widens it only while the judge is
 unsure.
 
-> **Status: v0.1 scaffold.** The engine, judges, window schedules, metrics and an offline harness
-> work and are tested. There are **no research results yet.** The bundled fixtures are tiny and
-> synthetic, and the offline mock judge is a plumbing stand-in, not a security model. See
-> [Status and limitations](#status-and-limitations).
+**Course project (IST 597, Penn State, fall 2026)** by Pengfei Zhang and Wei Hua Ong. Everything
+reported below was measured with real LLM judges (OpenAI GPT-6 Luna and Sol, Anthropic Claude Haiku 5.5
+and Sonnet 5.5) and is backed by the tables and judge-reasoning dumps in [`runs/`](runs/). The whole
+experimental programme cost about $22 in API credit. See [Results](#results) for the findings and
+[Status and limitations](#status-and-limitations) for what they do not show.
 
 ## Research question
 
@@ -43,12 +44,18 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```bash
 git clone <your-repo-url> temporalguard && cd temporalguard
-pip install -e ".[dev]"            # core + tests
-pip install -e ".[anthropic]"      # adds the Claude-backed judge
-pip install -e ".[openai]"         # adds the OpenAI-backed judge
+python -m venv .venv
+source .venv/bin/activate              # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,anthropic,openai,semantic]"
+python -m pytest -q                    # 188 tests, no network, no API key
 ```
 
-Python 3.10+. The core has no runtime dependencies.
+Extras: `dev` (tests and linters), `anthropic` and `openai` (the judges), `semantic` (sentence-transformers
+for the semantic gate; it pulls in PyTorch, which is large). The core has no runtime dependencies, so
+`pip install -e ".[dev]"` is enough to run the offline harness with the mock judge.
+
+Python: `requires-python >= 3.10`. The results in `runs/` were produced with **Python 3.13.14 on Windows 11**. The exact package versions are in
+[`runs/requirements_freeze.txt`](runs/requirements_freeze.txt).
 
 ## Quickstart
 
@@ -274,41 +281,101 @@ precision, output-level false-positive rate, localization (Jaccard of named vs t
 gate miss rate, judge calls, tokens and context examined per output, latency, and optional USD
 cost. Definitions are in `src/temporalguard/eval/metrics.py`.
 
+## Results
+
+All numbers below are from `runs/` (the command behind each file is in
+[`runs/COMMANDS.md`](runs/COMMANDS.md)). "Cheap" judges are GPT-6 Luna and Claude Haiku 5.5; "strong" judges
+are GPT-6 Sol and Claude Sonnet 5.5. "Final design" is the Fibonacci schedule with a minimum window of 3,
+a final full-history fallback and a confirm-on-flag call (`fib_min3_fallback_confirm`).
+
+1. **Context matters for locating an attack, not always for detecting it.** On engineered fragments that
+   need each other to be read, judging one output at a time finds the oldest fragment in 0 to 25% of long
+   sessions and every design with fallback and confirm finds it in all of them. On AgentDojo-derived attacks,
+   single-output judging already catches 89% (Haiku) and 98% (Luna), but finds the oldest fragment only 39%
+   and 67% of the time; the final design raises that to 93% and 85%.
+2. **Early stopping is a failure mode.** Starting at a window of 1 stops escalation on a lone fragment
+   (Luna recall 0.69); a minimum window of 3 restores recall 1.00 at no extra cost. Fallback fixes the judge
+   that escalates (Haiku) and confirm-on-flag fixes the one that flags early (Luna); the final design needs
+   both and handles a schedule-aware attacker (oldest-fragment recall 1.00 on both vendors, against 0 to 0.25
+   for windows-only schedules).
+3. **Fibonacci spacing gives no consistent benefit.** Against power-of-two and fixed windows its cost
+   differs by a few percent, cheaper with Luna and dearer with Haiku. This is a null result for the secondary
+   hypothesis.
+4. **Judges flag by provenance.** Cheap judges (and Sol on long sessions) flag any instruction in a tool
+   output, including harmless on-task ones: about 2% of AgentDojo's own benign outputs are flagged, almost
+   all on messages that instruct the agent. A strong second tier helps: Sonnet separates an attack from its
+   harmless twin in 16 of 16 pairs (Haiku alone: 6 of 16); Sol manages 10 of 16 (Luna alone: 7 of 16).
+5. **A cascade buys part of a strong judge for a quarter of its price.** The cheap judge screens everything and
+   the strong judge rules only on what it flags. On 27 long attacks it recovers about half (Claude) to two
+   thirds (OpenAI) of the strong judge's gain in oldest-fragment recall for about 25% of the strong judge's
+   dollars per output. With the final design it never changed whether an attack was detected (with single-output
+   windows the strong judge sometimes cleared a lone fragment). It cannot recover an attack the cheap judge never
+   flags.
+6. **A semantic gate beats a keyword gate by a wide margin.** The keyword gate lets 84% of fragments skip
+   the judge (recall 0.30). A sentence-embedding gate with mechanics-only exemplars keeps recall within
+   0.04 to 0.05 of the ungated design at 56% to 60% lower cost. Exemplars that name specific actions raise
+   recall to 0.98 but overlap the benchmark's topics, so we treat them as optimistic.
+
+The full pipeline (gate plus cascade) costs about 17% of the strong judge alone on both vendors.
+
+## Reproducing the results
+
+- **Tables and reasoning.** `runs/*.md` are the result tables, `runs/*_dump.jsonl` hold the judges' stated
+  reasoning for each decision, and `runs/COMMANDS.md` lists the exact command behind each file.
+- **The verdict caches are not in the repository.** They are about 20 MB, and rebuilding them from scratch
+  costs about $22 in API credit. Every judged run caches each (model, prompt, window) verdict, so rerunning a
+  command with the same cache costs nothing. The offline mock judge reproduces the plumbing for free:
+  `temporalguard eval --families adjacent paraphrased --per-family 2 --benign 2`.
+- **Keys and models.** Set `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` in your shell; they are never written to
+  files. OpenAI runs need `TEMPORALGUARD_OPENAI_REASONING_EFFORT=none`. The models are `gpt-6-luna`,
+  `gpt-6-sol`, `claude-haiku-5-5` and `claude-sonnet-5-5`.
+- **A cheap check that the code works:** `python -m pytest -q` runs 188 tests with no network.
+
 ## Repository layout
 
 ```
 src/temporalguard/
-  engine.py         TemporalGuard: gate, escalation loop, verdict policy
+  engine.py         gate, escalation loop, confirm-on-flag and fallback, verdict policy
   schedules.py      Fibonacci, PowerOfTwo, Linear, Fixed, Full, WithFullFallback
-  scanner/          cheap lexical risk scorer (the gate)
-  judge/            Judge interface, Claude judge, offline mock judge, prompts
-  strategies.py     the named configurations above
-  eval/             fixtures, episode builder, metrics, runner, report
-  cli.py            temporalguard schedules | demo | make-suite | eval
-tests/              pytest suite (no network)
-docs/ARCHITECTURE.md
-examples/quickstart.py
+  scanner/          keyword gate, stateful gate, semantic gate (sentence embeddings)
+  judge/            Claude and OpenAI judges, cascade judge, caching judge, offline mock judge
+  strategies.py     the named configurations
+  eval/             fixtures, AgentDojo-derived data, episode builder, metrics, runner, gate calibration, report
+  cli.py            temporalguard schedules | demo | make-suite | eval | gate-calibrate
+tests/              188 tests (no network)
+docs/               ARCHITECTURE.md, AGENTDOJO_REVIEW.md (review sheet for the 27 derived attacks)
+runs/               result tables, judge-reasoning dumps, COMMANDS.md, requirements_freeze.txt
+CONTRIBUTIONS.md    who did what
+THIRD_PARTY_NOTICES.md   AgentDojo (MIT) notice
 ```
 
 ## Status and limitations
 
-- **Mock judge numbers are not results.** It exists so the pipeline and metrics can be tested
-  without cost. Any table produced with `--judge mock` only demonstrates that the plumbing works.
-- **Fixtures are synthetic and small** (four lexical and three paraphrased fragment sets, a few
-  benign look-alikes). The planned benchmark derives distributed episodes from the AgentDojo task
-  suites; that adapter is not written yet.
-- **Not implemented yet:** the AgentDojo-derived benchmark, encoded and cross-tool fragment
-  families, and results from a real judge. The schedule-aware attacker and the fallback mitigation
-  exist and are tested with the mock judge only.
-- **Mock-judge comparisons between schedules are artifacts**, not findings. The mock keys on the
-  same keywords as the scanner and the fixtures, so schedule differences it shows depend on how the
-  mock composes categories.
-- **Cost is not automatically lower.** Escalating through 1,2,3,5,8,13 costs 32 outputs' worth of
-  context in the worst case at n = 20, more than one full scan. Savings only appear if most
-  decisions stop early, which is why `gated_full` is a required baseline.
-- **This is a research prototype, not a complete defense.** The judge is itself an LLM reading
-  untrusted text. Tool outputs are wrapped and boundary tags are neutralized, but the judge can
-  still be wrong or manipulated. Combine with least-privilege tool permissions.
+- **Small samples.** The headline comparisons use 27 AgentDojo-derived attacks (one per attack goal, split into
+  three fragments), 16 engineered long sessions built from four fragment sets, and 16 attack/twin pairs per vendor.
+  Intervals are bootstrap intervals over attacks; several are wide, and the twin results in particular rest on
+  four fragment sets with different filler.
+- **The attacks are derived, not AgentDojo's own.** The authors split AgentDojo's attack goals into fragments
+  (reviewed row by row in `docs/AGENTDOJO_REVIEW.md`), without AgentDojo's "important message" wrapper, and
+  replaced addresses with `.invalid` placeholders. The engineered families are synthetic.
+- **Two vendors, one sample per window.** Each judge verdict is sampled once and cached.
+- **Utility is measured only as false alarms.** We report false-alarm rates on benign sessions (synthetic and
+  AgentDojo's own text). We did not run agent tasks end to end, so task completion is not measured.
+- **The gate's exemplars overlap the benchmark.** The topic exemplars were written after reading AgentDojo's
+  attack goals; the generic-exemplar results are the ones to report.
+- **A cascade cannot raise detection above the cheap judge's.** It only sees windows the cheap judge flags.
+- **The adaptive attacker targets the window schedules, not the cascade or the gate.** An attacker who knows
+  the gate's exemplars or the strong judge was not tested.
+- **Not tested:** larger models (for example Claude Opus), encoded and cross-tool fragment families, and
+  GPT-6.1 Sol (it cannot do forced tool calls with reasoning disabled, which this judge needs).
+- **The mock judge produces no results.** It exists so the pipeline and metrics can be tested without cost.
+- **This is a research prototype, not a complete defense.** The judge is itself an LLM reading untrusted text.
+  Tool outputs are wrapped and boundary tags are neutralized, but the judge can still be wrong or manipulated.
+  Combine it with least-privilege tool permissions.
+
+## AI assistance
+
+We used Claude (Anthropic) throughout this project. Claude wrote and tested most of the code (the engine, the judges, the evaluation harness, the cascade and the gates), drafted the benchmark fragments and the documentation, analysed the result tables and produced the figures. The research question, the design decisions and the scope were ours. We ran every experiment ourselves with our own API keys, reviewed the AgentDojo-derived fragments row by row and decided what to report. The models that act as judges in the experiments are separate API calls made by the code, not part of how this project was written. We are responsible for all claims here.
 
 ## Related work
 
@@ -320,7 +387,6 @@ examples/quickstart.py
   takeover and localizes it with counterfactual re-execution. TemporalGuard studies a different
   mechanism, a semantic judge over an adaptively widened window, and its cost.
 
-Verify these citations against the papers before publishing anything.
 
 ## License
 
