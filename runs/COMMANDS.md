@@ -199,6 +199,44 @@ Result (27 attacks, final design; cheap alone / cascade / pipeline / strong alon
 
 The gate cuts the cascade's dollars by 31% on both vendors; the pipeline costs 17% of strong-only on both. OpenAI: root recall +0.19 over Luna alone ([0.00, +0.37], 6 attacks up, 1 down), precision 1.00. Claude: the pipeline adds little over Haiku alone (root +0.04, [-0.11, +0.22]) and loses one attack at the gate (detection 0.93 to 0.89), so it is not clearly worth its 3.5x cost there. The benefit depends on how weak the cheap tier is.
 
+### G4. Semantic gate (`gate-calibrate`, `gate_ad_*`, `gate_adbenign_*`)
+
+Needs `pip install sentence-transformers` (model `all-MiniLM-L6-v2`, downloaded on first use). The gate only removes judge calls, so every judged run below came from the caches (0 real calls).
+
+No-API comparison of the gates on the benchmark's fragments and benign outputs (cutoff chosen on the engineered families, reported on held-out ones):
+
+    temporalguard gate-calibrate --embedder st
+    temporalguard gate-calibrate --embedder st --exemplars generic
+
+Result with real embeddings (all exemplars): at cutoff 0.20 the semantic gate sent 100% of fit fragments and 97% of held-out fragments to the judge, and 49% of benign outputs; the keyword gate sent 6% and 14% of fragments and 5% of benign outputs.
+
+Judged runs of the final design with the keyword gate and the semantic gate, cutoffs 0.20 and 0.30, 54 attacks (`agentdojo`, `agentdojo_span`) and 40 benign sessions. OpenAI shown; Claude: `--judge anthropic --model claude-haiku-5-5 --cache runs\cache_claude.jsonl` and `claude` in the output names.
+
+    $env:TEMPORALGUARD_GATE_CUTOFF = "0.20"
+    temporalguard eval --judge openai --cache runs\cache_openai.jsonl --families agentdojo agentdojo_span --no-twins --per-family 27 --benign 0 --strategies fib_min3_fallback_confirm fib_min3_fallback_confirm_kwgated fib_min3_fallback_confirm_semgated --ci --by-family --workers 4 --price-in 0.10 --price-out 0.50 --out runs\gate_ad_openai_c0.20.md
+
+    temporalguard eval --judge openai --cache runs\cache_openai.jsonl --families agentdojo_benign --per-family 40 --benign 0 --strategies fib_min3_fallback_confirm fib_min3_fallback_confirm_kwgated fib_min3_fallback_confirm_semgated --ci --by-family --workers 4 --price-in 0.10 --price-out 0.50 --out runs\gate_adbenign_openai_c0.20.md
+
+The same two commands with `$env:TEMPORALGUARD_GATE_CUTOFF = "0.30"` and `c0.30` in the output names.
+
+Generic-exemplars check (the topic exemplars were written after reading AgentDojo's attack goals, so the all-exemplar rows are optimistic): the same commands with `$env:TEMPORALGUARD_EXEMPLARS = "generic"`, `--strategies fib_min3_fallback_confirm fib_min3_fallback_confirm_semgated` and output names ending `_generic.md` (`gate_ad_*_c0.20_generic.md`, `gate_ad_*_c0.30_generic.md`, `gate_adbenign_*_c0.20_generic.md`, `gate_adbenign_*_c0.30_generic.md`). Reset afterwards:
+
+    $env:TEMPORALGUARD_EXEMPLARS = "all"
+    Remove-Item Env:TEMPORALGUARD_GATE_CUTOFF
+
+Results on the 54 attacks, final design (recall / oldest fragment found / fragments missed at the gate / change in dollars per output against no gate):
+
+| Gate | OpenAI | Claude |
+|---|---|---|
+| No gate | 0.98 / 0.85 / 0% / n/a | 0.98 / 0.93 / 0% / n/a |
+| Keyword gate | 0.30 / 0.22 / 84% / about -93% | 0.30 / 0.26 / 84% / about -95% |
+| Semantic, all exemplars, cutoff 0.20 | 0.98 / 0.85 / 4% / -33% | 0.98 / 0.91 / 4% / -31% |
+| Semantic, all exemplars, cutoff 0.30 | 0.96 / 0.85 / 7% / -60% | 0.96 / 0.91 / 7% / -54% |
+| **Semantic, generic exemplars, cutoff 0.20 (number to report)** | **0.94 / 0.78 / 15% / -60%** | **0.93 / 0.81 / 15% / -56%** |
+| Semantic, generic exemplars, cutoff 0.30 | 0.81 / 0.65 / 36% / -80% | 0.80 / 0.70 / 36% / -74% |
+
+On the 40 benign sessions at cutoff 0.20 with generic exemplars, dollars per output fell about 77% on both vendors and the share of sessions with a flag fell from 0.28 to 0.10 (Claude) and from 0.35 to 0.17 (OpenAI). That happens because the gate also stops showing the judge benign messages that instruct the agent, so lower false alarms and lower recall come as a pair.
+
 ### H. Which finding comes from which file
 
 | Finding | Files |
@@ -223,29 +261,33 @@ The gate cuts the cascade's dollars by 31% on both vendors; the pipeline costs 1
 
 ### I. Total API spend (final readings, 25 Oct 2026, after all experiments)
 
-| Provider | Spent | Remaining | Volume |
-|---|---|---|---|
-| OpenAI (Luna and Sol, all runs) | $6.07 | $5.93 | 18,102 requests, 14.9M tokens |
-| Anthropic (Haiku 5.5, Sonnet 5.5 and the early Haiku 4.5 run, all runs) | $16.08 | $8.93 | last 30 days: 31.6M tokens in, 5.0M out (Haiku 5.5 dominates in tokens; Sonnet 5.5 dominates in dollars per token) |
-| **Total** | **$22.15** | | |
+| Provider | Covers | Spent | Remaining | Volume |
+|---|---|---|---|---|
+| OpenAI | Luna and Sol, all runs | $6.07 | $5.93 | 18,102 requests, 14.9M tokens |
+| Anthropic | Haiku 5.5, Sonnet 5.5 and the early Haiku 4.5 run (about $0.25), all runs | $16.08 | $8.93 | last 30 days: 31.6M tokens in, 5.0M out |
+| **Total** | | **$22.15** | | |
 
-The Anthropic Cost page chart lagged the Console total during the runs (earlier screenshots ended at 6:55 PM UTC on 24 Oct); the final Usage page screenshot reads "Data as of Oct 25, 1:05 AM UTC", so it had caught up for token counts. The Cost page itself was not re-checked after that, so the Console "spend this month" figure ($16.08) is the one used. Roughly: the Sonnet-only baseline cost about $7 to $8, the cascade and twin runs about $3, and everything on Haiku the rest. OpenAI's Sol-only baseline was about $3 to $3.5 of its total.
+Approximate split of the largest items (from the dashboards and the per-call prices, not itemized bills):
 
----|---|---|
-| OpenAI (all runs, Luna and Sol; last reading, may lag the final stages) | $5.67 (16,546 requests, 13.5M tokens) | $6.14 |
-| Anthropic (Console "spend this month": Haiku 4.5 early run about $0.25, Haiku 5.5, Sonnet 5.5) | $15.69 | $9.32 |
+| Item | Approximate cost |
+|---|---|
+| Sonnet-only baseline (Anthropic) | $7 to $8 |
+| Cascade and twin runs (Anthropic, Sonnet calls on flagged windows) | about $3 |
+| Everything else on Anthropic (Haiku runs, early Haiku 4.5 run) | about $5 to $6 |
+| Sol-only baseline (OpenAI) | $3 to $3.5 |
+| Everything else on OpenAI | about $2.5 to $3 |
 
-About $21 to $22 in total across both vendors so far. The Anthropic Cost page chart and its "total token cost" tile ($6.37) end at 6:55 PM UTC on 24 Oct and lag the Console total; use the Console spend figure and re-read it once the page has caught up. Usage over the last 30 days: 24.4M tokens in, 3.8M out (Haiku 5.5 dominates).
+How the readings moved while the experiments ran (Console "spend this month" for Anthropic, "October spend" for OpenAI):
 
----|---|---|
-| OpenAI (all runs, Luna and Sol; reading before the last Sol-only stage and the twin replicate settled) | $5.67 (16,546 requests, 13.5M tokens) | $6.14 |
-| Anthropic (Console "spend this month", includes Haiku 4.5 early run about $0.25, Haiku 5.5, Sonnet 5.5) | $14.51 | $10.50 |
+| Reading | OpenAI | Anthropic |
+|---|---|---|
+| Early (after the first real-judge runs) | $0.83 | n/a |
+| After the strategy grids and AgentDojo checks | $2.24 | $6.07 |
+| After the Sonnet-only baseline | $5.50 | $14.51 |
+| After the twin replicates | $5.67 to $5.92 | $15.16 to $15.69 |
+| **Final** | **$6.07** | **$16.08** |
 
-The Anthropic Cost page chart ends at 6:55 PM UTC on 24 Oct and lags the Console total; its "total token cost" tile ($6.37) did not match the $14.51 total at that moment. Use the Console spend figure and re-check once the page catches up.
-
----|---|---|
-| OpenAI (all runs, Luna and Sol) | $2.24 (13,582 requests, 11.2M tokens) | $2.76 |
-| Anthropic (all runs this month, Haiku and Sonnet, including the early run on the older default model) | $6.07 | $3.92 |
+The Anthropic Cost page chart lagged the Console total during the runs (earlier screenshots ended at 6:55 PM UTC on 24 Oct, and its "total token cost" tile, $6.37, did not match the total). The final Usage page screenshot reads "Data as of Oct 25, 1:05 AM UTC", so token counts had caught up. The Cost page itself was not re-checked after that, so the Console "spend this month" figure ($16.08) is the one used.
 
 ---
 
@@ -258,9 +300,6 @@ The Anthropic Cost page chart ends at 6:55 PM UTC on 24 Oct and lags the Console
 ---
 
 ## Part 4. Not run / planned
-
-**Optional runs that were planned and have no results yet**
-- Cascades on the engineered referential suites (long and short sessions, without twins), one for each vendor. Decided against: the cheap judges already reach full recall and root recall on those suites, so a stronger tier has no headroom. (The twin cascade is done: see Part 2, G.)
 
 **Not run on purpose**
 - `gpt-6.1-sol@low`. It does not accept reasoning effort `none`, so it needs the Responses API path (unit-tested only, never run live), and reasoning tokens are billed as output at $10 per million, which makes the cost per call higher and less predictable. Use a small cap such as 20 if you try it:
