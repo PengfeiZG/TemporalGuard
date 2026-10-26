@@ -375,7 +375,7 @@ THIRD_PARTY_NOTICES.md   AgentDojo (MIT) notice
 
 ## AI assistance
 
-We used Claude (Anthropic) throughout this project. Claude wrote and tested most of the code (the engine, the judges, the evaluation harness, the cascade and the gates), drafted the benchmark fragments and the documentation, analysed the result tables and produced the figures. The research question, the design decisions and the scope were ours. We ran every experiment ourselves with our own API keys, reviewed the AgentDojo-derived fragments row by row and decided what to report. The models that act as judges in the experiments are separate API calls made by the code, not part of how this project was written. We are responsible for all claims here.
+We used Claude (Anthropic) throughout this project. Claude wrote and tested most of the code (the engine, the judges, the evaluation harness, the cascade and the gates), drafted the benchmark fragments and analysed the result tables. The research question, the design decisions and the scope were ours. We ran every experiment ourselves with our own API keys, reviewed the AgentDojo-derived fragments row by row and decided what to report. The models that act as judges in the experiments are separate API calls made by the code, not part of how this project was written. We are responsible for all claims here.
 
 ## Related work
 
