@@ -67,6 +67,24 @@ class CachingJudge(Judge):
         payload = json.dumps(parts)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    def key_for(self, window: Sequence[ToolOutput], task: str | None = None) -> str:
+        """The cache key a call for this window would use."""
+        return self._key(window, task)
+
+    def put(self, window: Sequence[ToolOutput], task: str | None, result: JudgeResult) -> bool:
+        """Store a verdict obtained outside `judge` (for example from a batch). False if present."""
+        key = self._key(window, task)
+        raw = asdict(result)
+        with self._lock:
+            if key in self._store:
+                return False
+            self._store[key] = raw
+            if self.path:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with self.path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"key": key, "result": raw}) + "\n")
+        return True
+
     def is_cached(self, window: Sequence[ToolOutput], task: str | None = None) -> bool:
         """True if judging this window would be served from the cache (free)."""
         with self._lock:

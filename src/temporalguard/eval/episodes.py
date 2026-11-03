@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 
 from ..schedules import Fibonacci, WindowSchedule, blind_spot
-from . import agentdojo_data
+from . import agentdojo_data, ct3_data, ct4_data, li_data
 from .fixtures import (
     BENIGN_LOOKALIKES,
     DEFINITIONAL_SETS,
@@ -102,10 +102,12 @@ def build_episode(
     lead: int = 0,
     tail: int = 1,
     filler: Sequence[str] | None = None,
+    tools: Sequence[str] | None = None,
 ) -> Episode:
     """Fill positions with `fragments` and everything else with random filler.
 
     `filler` defaults to the generic pool; the AgentDojo families pass realistic benign outputs.
+    `tools` names the tool of each fragment (one per fragment); other outputs get a random tool.
     """
     if len(fragments) != len(positions):
         raise ValueError("need one position per fragment")
@@ -115,9 +117,10 @@ def build_episode(
     total = offset + positions[-1] + 1 + tail
     outputs: list[tuple[str, str]] = []
     frag_at = {offset + p: f for p, f in zip(positions, fragments, strict=True)}
+    tool_at = dict(zip(frag_at, tools, strict=True)) if tools else {}
     for i in range(total):
         text = frag_at.get(i) or rng.choice(filler or FILLER)
-        outputs.append((_tool_for(rng), text))
+        outputs.append((tool_at.get(i) or _tool_for(rng), text))
     return Episode(episode_id, family, task, outputs, sorted(frag_at))
 
 
@@ -189,6 +192,26 @@ FAMILY_SPECS: dict[str, dict] = {
     "agentdojo_span": dict(kind="span", lead=(0, 2), sets="agentdojo", span=(20, 30)),
     # Benign sessions made only of AgentDojo's environment text: the false-positive check.
     "agentdojo_benign": dict(benign_only=True, sets="agentdojo"),
+    # LogicInception-style chains written by the authors from the AgentDojo-derived goals (see
+    # eval/li_data.py): declarative fragments with no command. `li` places them as separate
+    # outputs, `li_span` spreads them over a long session, `li_concat` joins them into ONE output
+    # (the paper's default when a tool exposes a single injection point).
+    "li": dict(kind="adjacent", lead=(2, 6), sets="li", twin=True),
+    "li_span": dict(kind="span", lead=(0, 2), sets="li", span=(20, 30), twin=True),
+    "li_concat": dict(kind="adjacent", lead=(2, 6), sets="li", concat=True, twin=True),
+    # Cross-tool v3 (eval/ct3_data.py): twelve chains of three plain records from three
+    # tools, each with a matched twin that differs only in the target in the first record.
+    # `ct3` places them as separate outputs, `ct3_span` spreads them over a long session,
+    # `ct3_concat` joins them into one output. Twins come from the same file (--no-twins
+    # omits them).
+    "ct3": dict(kind="adjacent", lead=(2, 6), sets="ct3", twin=True),
+    "ct3_span": dict(kind="span", lead=(0, 2), sets="ct3", span=(20, 30), twin=True),
+    "ct3_concat": dict(kind="adjacent", lead=(2, 6), sets="ct3", concat=True, twin=True),
+    # Cross-tool v4 (eval/ct4_data.py): the v3 scenarios with the target moved behind two links;
+    # the twin differs only in the target in the second record (the directory). Same placements.
+    "ct4": dict(kind="adjacent", lead=(2, 6), sets="ct4", twin=True),
+    "ct4_span": dict(kind="span", lead=(0, 2), sets="ct4", span=(20, 30), twin=True),
+    "ct4_concat": dict(kind="adjacent", lead=(2, 6), sets="ct4", concat=True, twin=True),
 }
 # fragment pool name -> {set name: {"attack": [...], "benign": [...], optional "task": str}}
 TWIN_SETS: dict[str, dict] = {
@@ -249,25 +272,68 @@ def build_suite(
                     )
                 )
             continue
-        pool = FRAGMENT_POOLS[spec["sets"]]
+        li_rows = li_data.load_li() if spec["sets"] == "li" else {}
+        li_twins = (
+            li_data.load_twins() if spec["sets"] == "li" and spec.get("twin") and twins else {}
+        )
+        ct3_rows = (
+            ct3_data.load_ct3()
+            if spec["sets"] == "ct3"
+            else ct4_data.load_ct4()
+            if spec["sets"] == "ct4"
+            else {}
+        )  # v3 and v4 rows have the same shape
+        if li_rows:
+            pool = {k: v["fragments"] for k, v in li_rows.items()}
+        elif ct3_rows:
+            pool = {k: v["fragments"] for k, v in ct3_rows.items()}
+        else:
+            pool = FRAGMENT_POOLS[spec["sets"]]
         set_names = sorted(pool)
         for i in range(per_family):
             fragments = pool[set_names[i % len(set_names)]]
+            if spec.get("concat"):
+                fragments = [" ".join(fragments)]  # one output carries the whole chain
             lead = rng.randint(*spec["lead"])
             span = rng.randint(*spec["span"]) if "span" in spec else None
             positions = placement(spec["kind"], len(fragments), rng=rng, span=span)
             set_name = set_names[i % len(set_names)]
             twin_set = TWIN_SETS.get(spec["sets"], {}).get(set_name, {})
             task_kw = {"task": twin_set["task"]} if "task" in twin_set else {}
-            if spec["sets"] == "agentdojo":
-                suite = agentdojo_data.ATTACKS[set_name]["suite"]
-                tasks = agentdojo_data.USER_TASKS[suite]
+            if spec["sets"] in ("agentdojo", "li"):
+                base = li_rows[set_name]["base"] if li_rows else set_name
+                suite = agentdojo_data.ATTACKS[base]["suite"]
+                tasks = (
+                    li_data.user_tasks(suite)
+                    if spec["sets"] == "li"
+                    else agentdojo_data.USER_TASKS[suite]
+                )
                 task_kw = {"task": tasks[i % len(tasks)], "filler": agentdojo_filler(suite)}
+            elif spec["sets"] in ("ct3", "ct4"):
+                row = ct3_rows[set_name]
+                task_kw = {
+                    "task": row["task"],
+                    "filler": agentdojo_filler(row["suite"]),
+                    "tools": row["tools"][:1] if spec.get("concat") else row["tools"],
+                }
             attack = build_episode(
                 f"{family}-{i:02d}", family, fragments, positions, rng, lead=lead, **task_kw
             )
             episodes.append(attack)
-            if spec.get("twin") and twins:
+            if spec.get("twin") and twins and spec["sets"] in ("ct3", "ct4"):
+                twin_parts = ct3_rows[set_name]["twin"]
+                parts = [" ".join(twin_parts)] if spec.get("concat") else twin_parts
+                episodes.append(make_twin(attack, parts, f"{family}_twin"))
+            elif spec.get("twin") and twins and spec["sets"] == "li":
+                if li_twins:  # twins exist only when a twin file is given
+                    twin = li_twins.get(set_name)
+                    if twin is None:
+                        raise ValueError(f"no benign twin for {set_name} in the twin file")
+                    parts = (
+                        [" ".join(twin["fragments"])] if spec.get("concat") else twin["fragments"]
+                    )
+                    episodes.append(make_twin(attack, parts, f"{family}_twin"))
+            elif spec.get("twin") and twins:
                 episodes.append(make_twin(attack, twin_set["benign"], f"{family}_twin"))
     for i in range(benign):
         length = rng.randint(6, 24)

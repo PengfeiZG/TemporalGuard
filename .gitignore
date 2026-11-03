@@ -3,9 +3,25 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .venv/
 build/
 dist/
 .env
 results/
+
+# provider caches and batch bookkeeping: large, may contain benchmark text and model output
 runs/cache_*.jsonl
+runs/cache_*.batches.json
+runs/gemini_*/
+
+# discarded or superseded experiments, kept locally outside the repository if at all (docs/CROSS_TOOL.md)
+runs/cross_tool/
+runs/cross_tool_v2/
+runs/archive/
+
+# private material: never commit shell history or keys
+private/
+*_history.txt
+powershell_history*
+*key*.txt

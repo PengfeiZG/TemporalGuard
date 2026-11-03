@@ -84,8 +84,8 @@ class AnthropicJudge(Judge):
         self.max_tokens = self._max_tokens or (2000 if mode == "auto" else DEFAULT_MAX_TOKENS)
         self.tool_retries = max(0, tool_retries)
 
-    def judge(self, window: Sequence[ToolOutput], task: str | None = None) -> JudgeResult:
-        start = time.perf_counter()
+    def build_request(self, window: Sequence[ToolOutput], task: str | None = None) -> dict:
+        """The first request sent for a window (also what the batch command submits)."""
         request: dict = {
             "model": self.model,
             "max_tokens": self.max_tokens,
@@ -99,6 +99,11 @@ class AnthropicJudge(Judge):
             request["system"] = SYSTEM_PROMPT + AUTO_TOOL_SUFFIX
             if self.model.startswith("claude-sonnet-5-5"):
                 request["thinking"] = {"type": "between_tools"}
+        return request
+
+    def judge(self, window: Sequence[ToolOutput], task: str | None = None) -> JudgeResult:
+        start = time.perf_counter()
+        request = self.build_request(window, task)
         attempts = 1 + (self.tool_retries if self.tool_choice_mode == "auto" else 0)
         in_tok = out_tok = used = 0
         block = None
