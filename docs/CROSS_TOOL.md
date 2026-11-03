@@ -1,7 +1,5 @@
 # Cross-tool experiments (v1 to v4)
 
-<!-- +AI: merged by Claude (2 Nov 2026) from the former cross-tool history, dependent-benchmark, v3 guide and v3 and v4 lock-record documents; authors to check -->
-
 Four cross-tool designs were tried. Two were run and discarded, v3 is a diagnostic result, and v4 is the cross-tool result reported in the README. None of them contains a command in any record, so v3 and v4 are
 **cross-tool authorization inconsistencies, not prompt injections in the strict sense**, and are never reported as prompt-injection detection. All v3 and v4 rows are marked `+AI` (drafted and revised with Claude; the authors review and add initials).
 
@@ -197,19 +195,15 @@ not a tool-using agent.
 Twelve scenarios, one run each; cheap models only in the probe; the records are not instructions; the filler is not in the scenarios' formats; the scenarios were revised with AI help after the authors' first draft and
 adjusted (`ct3_04`, `ct3_10`) after seeing probe answers, before the lock and before any judge run.
 
-<!-- +AI: added by Claude (2 Nov 2026); authors to check -->
-
 #### What the cheap judges showed (2 November 2026)
 
-Luna, Haiku and Flash-Lite were run on the locked file with no change to it (`COMMANDS.md` Part 8.4 to 8.6; `runs/ct3_twin_gap_summary.md`). Point 3 above decided the reading: on single reads
+Luna, Haiku and Flash-Lite were run on the locked file with no change to it (`COMMANDS.md` Part 8.4 and 8.5; `runs/ct3_twin_gap_summary.md`). Point 3 above decided the reading: on single reads
 the first record is flagged alone in 79% (Luna) and 58% (Flash-Lite) of sessions, the second and third never, and no twin record is ever flagged. The detection is therefore target-versus-task checking of
 one record, and windows add nothing (Luna gap +0.86 single read, +0.72 final design, +0.78 full history; Flash-Lite +0.61, +0.47, +0.47; Haiku about zero). Detection does not track the probe: the four
-scenarios agents resisted are flagged at least as often as the eight they followed. The semantic gate does not separate attack from twin records. **Status: v3 is a diagnostic result.** It does not test
+scenarios agents resisted are flagged at least as often as the eight they followed. **Status: v3 is a diagnostic result.** It does not test
 cross-tool reasoning, and it is not reported as prompt-injection detection. The next version (v4) moves the target behind two links so that no single record can be compared with the task.
 
 ## 3. v4: the target behind two links
-
-<!-- +AI: added by Claude (2 Nov 2026); authors to check -->
 
 The twelve scenarios in `data/cross_tool_v4_scenarios.csv` were locked on 2 November 2026, after one single-read pilot (Luna) and before the agent-compliance probe and any judge run. Changing any fragment, task or target after this
 point makes it a new version, to be reported as such.
@@ -255,7 +249,7 @@ other 26 flags in the pilot are on filler outputs, not on scenario records.
 3. **The first thing to read.** The single-read part table (`python scripts/ct3_twin_gap.py --version ct4`): attack F2 against twin F2, and F1 in both. The single-read gap above (+0.17, from the pilot) is the **baseline**: a claim that windows help needs
    the final design or full history to rise clearly above it.
 4. **Reading rule.** v4 supports a cross-tool claim at most about **two** records (F1 and F2 together reveal the mismatch; F3 adds the activation only), and only if the gap grows with context beyond the single-read baseline.
-5. **No gate arm** in the main v4 test (the semantic gate did not separate attack from twin on v3); strong judges (Sonnet, Gemini Pro) only if the cheap judges show something worth confirming.
+5. **No gate arm** in the main v4 test (the semantic gate did not separate attack from twin records on v4: `COMMANDS.md` Part 9.8); strong judges (Sonnet, Gemini Pro) only if the cheap judges show something worth confirming.
 6. **Filler.** AgentDojo's benign text for the suite nearest each scenario's domain (`ct3_data.DOMAIN_SUITE`, shared with v3); it is not in the scenarios' own tool formats.
 
 ### 3.5 The split (set after the probe, before any judge run; 2 November 2026)

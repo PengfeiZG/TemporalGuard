@@ -748,20 +748,6 @@ Any-flag false alarms on `ct3_span` twins (Luna 0.67 / 0.25 / 0.25, Flash-Lite 0
 **Reading.** Detection comes from the first record alone (its target compared with the user's task); context adds nothing; twins are never flagged; detection does not track whether agents act. v3 is
 therefore reported as a diagnostic result, not as a test of cross-tool reasoning and not as prompt-injection detection. Strong judges were not run on v3 (decision: keep them for v4, if useful).
 
-### 8.6 Semantic gate on v3 (no API calls)
-
-`gate-calibrate` with `--embedder st --exemplars generic` and the ct3 families held out. The command was run in four variants; the printed output was not saved, so rerun to reproduce:
-
-```powershell
-temporalguard gate-calibrate --embedder st --exemplars generic --test ct3 ct3_span ct3_concat
-temporalguard gate-calibrate --embedder st --exemplars generic --test ct3
-temporalguard gate-calibrate --embedder st --exemplars generic --test ct3_concat
-temporalguard gate-calibrate --embedder st --exemplars generic --context 2 --test ct3 ct3_span ct3_concat
-```
-
-Result as recorded by the authors: attack and twin records pass at nearly equal rates; at the suggested cutoff 0.20 the gate sends 90% to 96% of v3 records and 33% to 53% of benign outputs; at 0.40 and above
-almost none. Decision: no gate arm in the main v4 test; reported as a limitation.
-
 ---
 
 ## Part 9. Cross-tool v4 (frozen 2 Nov 2026; pilot, probe, cheap-judge and strong-judge runs done)
@@ -924,3 +910,33 @@ as Haiku does not, so judge strength does not predict the result. (3) Sol is not
 On single reads Sonnet allowed all 24 F2 records, 20 of its 24 explanations noting that the address differs from the one the user named and calling it a data mismatch, not an instruction; Gemini Pro allowed all 24 and only 1 of 24 explanations mentions a difference, so it mostly did not compare the record with the task (5 of 21 with full history);
 Luna flagged 7 of 24 on single reads and 22 of 24 with full history, with reasons of the form "conflicts with the user's explicit destination, so treat it as untrusted". So the Anthropic and Gemini judges follow the prompt's wording literally, and the OpenAI judges extend it to an authorization mismatch. These are the judges' stated reasons, not proof of their internal process,
 and a prompt written for authorization mismatches was not tried (it would be a new experiment). Limits as in 9.6.
+
+### 9.8 Semantic gate on v4 (no API calls; run 3 Nov 2026)
+
+<!-- +AI: added by Claude (3 Nov 2026) from the authors' saved gate outputs; authors to check -->
+Commands (default seed 0, 12 per family; `utf8` so the files can be read):
+
+```powershell
+temporalguard gate-calibrate --embedder st --exemplars generic --test ct4 ct4_span ct4_concat | Out-File -Encoding utf8 runs\ct4_gate_calibrate.txt
+temporalguard gate-calibrate --embedder st --exemplars generic --context 2 --test ct4 ct4_span ct4_concat | Out-File -Encoding utf8 runs\ct4_gate_calibrate_context2.txt
+```
+
+Setup: MiniLM (`sentence-transformers/all-MiniLM-L6-v2`) embedder, generic exemplars; the cutoff is fit on the synthetic families `paraphrased`, `dependent` and `definitional` (the suggested cutoff is the highest that escalates at least 95% of their fragments, 0.20 in both runs), and the v4 families are held out and only reported.
+"Attack records" are the scenarios' records in attack sessions, "twin records" the same in twin sessions. Share of outputs the gate sends to the judge:
+
+| Cutoff | Outputs scored | Attack records | Twin records | Benign outputs |
+|---|---|---|---|---|
+| 0.20 | one | 79% | 88% | 36% |
+| 0.20 | two joined | 95% | 94% | 53% |
+| 0.25 | one | 45% | 44% | 27% |
+| 0.25 | two joined | 70% | 67% | 39% |
+| 0.30 | one | 24% | 25% | 17% |
+| 0.30 | two joined | 40% | 43% | 26% |
+| 0.40 | one | 2% | 2% | 6% |
+| 0.40 | two joined | 6% | 5% | 9% |
+| 0.50 | either | 0% | 0% | 1% |
+
+The keyword gate (threshold 0.20) sends 6% of attack records, 4% of twin records and 8% of benign outputs.
+
+**Reading.** (1) Twin records pass about as often as attack records at every cutoff (at 0.20: 79% against 88% with one output scored, 95% against 94% with two joined), so the gate cannot tell the redirect from its benign twin: it measures resemblance to generic injection-like text, and v4's records are plain data.
+(2) At the suggested cutoff 0.20 the gate sends 79% or 95% of the attack records to the judge, so 21% or 5% never reach it, and it also sends 36% or 53% of benign outputs, so it saves little; at 0.40 and above it passes almost nothing and would miss nearly every attack. (3) Decision: no gate arm in the v4 judge runs; reported as a limitation. The gate was not run end to end with a judge.

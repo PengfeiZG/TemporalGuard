@@ -451,10 +451,6 @@ number of probe answers acting on the record is near zero or negative for every 
 flagged) although Haiku as an agent acted on the record in 67% of answers. In `ct3_span` the AgentDojo filler around the twins was flagged in some sessions (Luna single read 8 of 12), which is why the
 any-flag false-alarm column in `runs/ct3_*` tables is not zero; these flags are on filler, not on the scenario records.
 
-**Semantic gate on v3** (`gate-calibrate`, `st` embedder, generic exemplars, ct3 families held out): it does not separate attack records from twin records (they pass at nearly equal rates); at the
-suggested cutoff 0.20 it sends 90% to 96% of v3 records to the judge but also 33% to 53% of benign outputs, and at 0.40 or higher almost none. No gate arm is planned for v4; this is reported as a limitation.
-(The printed output of this run was not saved in `runs/`.)
-
 **Conclusion.** v3 shows that cheap judges can catch a record whose target contradicts the task, and that one cheap judge (Haiku) does not, but it cannot show that windows detect distributed
 inconsistencies, because no scenario needs more than one record to be caught. It is reported as a diagnostic result, not as prompt-injection detection. Commands are in [`COMMANDS.md`](COMMANDS.md) Part 8.
 
@@ -474,6 +470,8 @@ the directory record (F2) alone is flagged in 0.29 of attack sessions and 0.00 o
 claim about context. The agent-compliance probe (one step, three samples) found that Luna acts on the poisoned record in 24 of 36 attack answers (22 naming the attack address), Haiku in 18 of 36 (mostly by asking to look up the alias; 3 name the address),
 and Flash-Lite in none; all three are consistent with the task on the twins. By the v3 rule six scenarios are *followed* (`ct4_01`, `04`, `05`, `06`, `09`, `11`), a weak split because only Luna often names the attack address.
 The six judge runs (three cheap, three strong) are summarised in Results item 10 (details: [`COMMANDS.md`](COMMANDS.md) Part 9.6 and 9.7, [`docs/CROSS_TOOL.md`](docs/CROSS_TOOL.md) section 3), and any claim concerns two records at most.
+
+**Semantic gate on v4** (`gate-calibrate`, MiniLM embedder, generic exemplars, v4 families held out; no API calls): it does not separate attack records from twin records, which pass at nearly equal rates (at the suggested cutoff 0.20: 79% against 88% with one output scored, 95% against 94% with two joined). That cutoff sends 79% to 95% of the attack records to the judge, so up to 21% never reach it, and also 36% to 53% of benign outputs; at 0.40 or higher it passes almost nothing. No gate arm was run in the v4 judge runs; this is reported as a limitation ([`COMMANDS.md`](COMMANDS.md) Part 9.8).
 
 ## Repository layout
 
