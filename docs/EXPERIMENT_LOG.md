@@ -15,7 +15,7 @@ File counts are generated from `runs/` (tables and dumps together). Total spend 
 | Schedule-aware attacker | Luna, Haiku, Gemini | `adaptive_*` | 6 | Part 2 G2 | yes (Results 2) |
 | Gate plus cascade pipeline | Luna+Sol, Haiku+Sonnet, Gemini | `ad_pipeline_*`, `*gemini_pipeline*` | 7 | Part 2 G3; Part 5 M | yes (Results 5) |
 | Semantic gate | Luna, Haiku | `gate_*` | 16 | Part 2 G4 | yes (Results 6) |
-| Gemini evaluations, cascade and Pro-only baseline | Gemini 3.1 Pro, Flash-Lite | `gemini_cascade_*`, `gemini_pro_final*`, `gemini_pro_only*` | 13 | Part 5 J, K, N | listed; results not summarised in the README |
+| Gemini evaluations, cascade and Pro-only baseline | Gemini 3.1 Pro, Flash-Lite | `gemini_cascade_*`, `gemini_pro_final*`, `gemini_pro_only*` | 13 | Part 5 J, K, N | yes (Results, Gemini table after item 6) |
 | Cross-tool v1 and v2 (discarded) | Gemini, Luna, Haiku | not in the repository | 0 | `docs/CROSS_TOOL.md` | run and discarded; design could not support a conclusion |
 | LogicInception-style attacks, variants A and B | Luna, Haiku, Sonnet, Sol | `liA_openai*`, `liB_openai*`, `liA_claude*`, `liB_claude*`, `li?_sonnet*`, `li?_sol*` | 24 | Part 6.1, 6.3 | yes (Results 7, 8) |
 | LogicInception-style chains with benign twins | Luna, Haiku, Sonnet, Sol, Gemini Pro, Flash-Lite | `li?_twin_*` | 24 | Part 6.2 to 6.4 | yes (Results 7, 8) |

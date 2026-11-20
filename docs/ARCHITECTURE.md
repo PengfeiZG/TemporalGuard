@@ -12,7 +12,7 @@ for a full-history LLM scan on every output.
                               │
                               ▼
                    ┌────────────────────┐
-                   │  Scanner (no LLM)  │  risk in [0,1] from lexical features of output i
+                   │  Scanner (no LLM)  │  risk in [0,1] for output i (keywords, stateful, or embeddings)
                    └─────────┬──────────┘
                              │
              risk < gate_threshold and gate enabled?
@@ -45,15 +45,23 @@ the judge named, and a rationale, so runs are auditable and cost is measurable.
 | `models.py` | `ToolOutput`, `Verdict`, `JudgeResult`, `Decision`, `Usage` |
 | `config.py` | `EngineConfig` thresholds and failure policies, validated |
 | `schedules.py` | window schedules and coverage/blind-spot helpers |
-| `scanner/heuristic.py` | noisy-OR lexical risk score (the cost gate) |
+| `scanner/heuristic.py` | noisy-OR lexical risk score (the keyword gate) |
+| `scanner/stateful.py` | keyword gate that boosts risk when an output adds a new attack stage to recent history |
+| `scanner/semantic.py` | semantic gate: local sentence-embedding (or hashing baseline) similarity to exemplar sentences |
 | `judge/base.py` | `Judge` interface, `JudgeError`, verdict validation |
 | `judge/prompts.py` | system prompt, verdict tool schema, tag neutralization |
 | `judge/anthropic_judge.py` | Claude Messages API judge with forced `record_verdict` tool use |
-| `judge/openai_judge.py` | OpenAI Chat Completions judge with a forced `record_verdict` function call |
+| `judge/openai_judge.py` | OpenAI Chat Completions judge with a forced `record_verdict` function call (Responses API for tiers given an effort) |
+| `judge/gemini_judge.py` | Gemini judge (google-genai SDK) with JSON output, validated by the shared `parse_verdict` |
+| `judge/cascade.py` | `CascadeJudge`: cheap judge on every window, strong judge only on what the cheap one flags |
+| `judge/cache.py` | `CachingJudge`: disk cache of verdicts keyed by the exact prompt |
 | `judge/mock.py` | offline stand-in that composes fragment categories (testing only) |
 | `engine.py` | `TemporalGuard`: history, gate, escalation, verdict |
+| `cost.py` | token estimates and optional dollar accounting (`PriceTable`) |
 | `strategies.py` | named (schedule, gate) configurations used in experiments |
-| `eval/` | fixtures, episode builder, metrics, runner, reports |
+| `eval/` | fixtures, AgentDojo-derived, LogicInception-style and cross-tool v3/v4 data, episode builder, metrics, stats, runner, reports |
+| `eval/batch.py`, `eval/gemini_batch.py`, `eval/gemini_li_batch.py` | Anthropic and Gemini batch-API cache warmers |
+| `eval/gate.py` | gate calibration with no API calls (`gate-calibrate`) |
 | `cli.py` | command line entry points |
 
 ## Escalation algorithm
@@ -71,6 +79,11 @@ inspect(output):
     return policy(r)
 ```
 
+The final design (`fib_min3_fallback_confirm`) adds three options to this loop: the first window
+is at least `min_window` (3), the schedule ends with a full-history window (`WithFullFallback`),
+and a flag triggers one confirm call on the full history that merges the fragments it names
+without changing the verdict.
+
 Verdict policy: not malicious or confidence < `flag_min_confidence` → ALLOW; malicious with
 confidence ≥ `block_confidence` → BLOCK; otherwise QUARANTINE. If the widest window is still
 unconfident, `on_ambiguous` chooses between following the label, quarantining (fail closed), or
@@ -84,7 +97,8 @@ allowing (fail open). If the judge errors, `on_error` applies (default: quaranti
    skipping the judge are not credited to the window schedule.
 3. **`gated_full` is a first-class baseline.** Without "cheap gate, then one full-context judge",
    the schedule's benefit cannot be separated from the gate's.
-4. **Structured, validated verdicts.** The Claude judge forces a `record_verdict` tool call and
+4. **Structured, validated verdicts.** The Claude and OpenAI judges force a `record_verdict` call
+   where the model allows it, the Gemini judge asks for JSON, and
    `parse_verdict` clamps confidence, drops unknown fragment indices, and rejects malformed
    output rather than guessing.
 5. **The judge is treated as attackable.** Outputs are wrapped in `<tool_output>` tags, tag-like
@@ -121,19 +135,25 @@ usage. `temporalguard schedules --n N` prints these figures for any history leng
 ## Threat model and known gaps
 
 - **Blind spot.** A schedule whose largest window is smaller than the history never sees the
-  oldest outputs. An attacker who knows the schedule could place a fragment there. Mitigations to
-  evaluate: `WithFullFallback`, periodic full scans, provenance-based retention of risky outputs.
+  oldest outputs. An attacker who knows the schedule could place a fragment there.
+  Against such an attacker the final design (fallback plus confirm-on-flag) found the oldest
+  fragment in every session with Luna and Haiku; fallback alone did so only with Haiku
+  (`runs/adaptive_ref_*`). Periodic full scans and provenance-based retention were not evaluated.
 - **Gate misses.** A fragment that looks harmless lexically is never judged. The evaluation
   reports `gate_miss_rate`; the bundled fixtures use strong cues, so their rate is optimistic.
 - **Judge error and manipulation.** The judge is an LLM reading untrusted text.
-- **Out of scope for v0.1:** paraphrased/encoded/cross-tool fragments, multimodal content, memory
-  poisoning, and enforcement beyond returning a verdict (the host application decides what to do).
+- **Gate and cascade attackers.** The adaptive attacker targets the window schedule only; an
+  attacker who knows the gate's exemplars or the strong judge was not tested.
+- **Out of scope for v0.1:** encoded fragments, multimodal content, memory poisoning, and
+  enforcement beyond returning a verdict (the host application decides what to do). Paraphrased
+  fragments and cross-tool records are covered by the `paraphrased`, `ct3*` and `ct4*` families.
 
 ## Evaluation plan
 
 1. Build distributed episodes from AgentDojo attacks, placed with adjacent, spaced,
    Fibonacci-gap and long-context patterns among ordinary outputs, plus benign sessions with
-   look-alike content (`eval/episodes.py`; the AgentDojo adapter is future work).
+   look-alike content (`eval/episodes.py`, with AgentDojo-derived material in
+   `eval/agentdojo_data.py`).
 2. Run every strategy in `strategies.py` with the same judge and prompts.
 3. Report the metrics in `eval/metrics.py`; compare `fib` against `pow2`, `fixed5`, `full` and
    `gated_full` on recall, false positives, and tokens.
