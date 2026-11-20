@@ -408,13 +408,17 @@ def episodes_to_json(episodes: Sequence[Episode]) -> str:
 
 
 def episodes_from_json(text: str) -> list[Episode]:
-    return [
-        Episode(
-            id=e["id"],
-            family=e["family"],
-            task=e["task"],
-            outputs=[(t, c) for t, c in e["outputs"]],
-            attack_indices=list(e.get("attack_indices", [])),
-        )
-        for e in json.loads(text)
-    ]
+    episodes = []
+    for e in json.loads(text):
+        outputs = [(t, c) for t, c in e["outputs"]]
+        indices = list(e.get("attack_indices", []))
+        # a typo here would silently count as a detection miss, so reject it
+        if indices != sorted(set(indices)) or any(
+            not isinstance(i, int) or not 0 <= i < len(outputs) for i in indices
+        ):
+            raise ValueError(
+                f"episode {e['id']!r}: attack_indices {indices} must be distinct, ascending "
+                f"and within 0..{len(outputs) - 1}"
+            )
+        episodes.append(Episode(e["id"], e["family"], e["task"], outputs, indices))
+    return episodes

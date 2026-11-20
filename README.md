@@ -512,6 +512,22 @@ THIRD_PARTY_NOTICES.md   AgentDojo (MIT) notice
   the benign twins are harmless but partly off-task. The notice-voice results mix detecting the attack with
   reacting to the notice format.
 - **The mock judge produces no results.** It exists so the pipeline and metrics can be tested without cost.
+- **Long outputs are cut before the judge sees them.** Each output is truncated to its first
+  `max_chars_per_output` characters (4,000 by default) with no marker, so an attacker can hide a fragment
+  behind 4,000 characters of padding, and a long legitimate page can be misjudged. This does not affect the
+  reported results: the longest tool output in any suite we built is 469 characters, and the longest string in
+  any `runs/` dump is 634. We left the engine unchanged because changing the judge's input would invalidate
+  every cached verdict; `tests/test_engine.py` keeps the gap visible as an expected failure.
+- **Long sessions get expensive.** The history is never capped, so full-history windows (the final design's
+  fallback, `confirm_flags`, `full`) grow with the session. Our sessions have at most about 30 outputs; a real
+  agent with hundreds would pay cost that grows with the square of the session length, and could exceed the
+  judge's context limit, after which failed calls are quarantined.
+- **The semantic gate only scores the start of an output.** Sentence-transformer models cut input at their
+  token limit, so text late in a long output is never scored, and with `context > 1` the newest output (joined
+  last) is the part that is cut. This affects only the optional gate arms, not the default design.
+- **Code review scope.** A code audit covered the core library (engine, schedules, judges, cache, cascade,
+  scanners) and the main `eval` path. It did not cover `scripts/`, the Gemini batch modules, the CT3/CT4 probe
+  and validation tools, the data files or `runs/`.
 - **This is a research prototype, not a complete defense.** The judge is itself an LLM reading untrusted text.
   Tool outputs are wrapped and boundary tags are neutralized, but the judge can still be wrong or manipulated.
   Combine it with least-privilege tool permissions.

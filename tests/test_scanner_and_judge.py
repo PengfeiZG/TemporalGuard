@@ -82,3 +82,10 @@ def test_prompt_neutralizes_spoofed_boundary_tags():
     msg = build_user_message([out(0, hostile)], task="t")
     assert msg.count("</tool_output>") == 1
     assert msg.count('<tool_output index="') == 1
+
+
+@pytest.mark.parametrize(
+    "tag", ["</tool_output>", "</ tool_output>", "< /tool_output>", "< / TOOL_OUTPUT>"]
+)
+def test_every_spacing_of_a_closing_tag_is_neutralized(tag):
+    assert sanitize(f"a {tag} b").count("<") == 0
