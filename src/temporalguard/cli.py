@@ -266,16 +266,21 @@ def cmd_eval(args: argparse.Namespace) -> int:
     if args.adaptive:
         progress = None if args.quiet or args.judge == "mock" else _progress
         collected: dict = {}
-        rows = compare_adaptive(
-            judge,
-            args.strategies,
-            config,
-            seed=args.seed,
-            workers=args.workers,
-            progress=progress,
-            pool=args.adaptive_pool,
-            collect=collected,
-        )
+        try:
+            rows = compare_adaptive(
+                judge,
+                args.strategies,
+                config,
+                seed=args.seed,
+                workers=args.workers,
+                progress=progress,
+                pool=args.adaptive_pool,
+                collect=collected,
+            )
+        except BudgetExceeded as exc:
+            print(f"stopped: {exc}", file=sys.stderr)
+            _report_cache(judge)
+            return 3
         print("schedule-aware attacker (each strategy attacked around its own schedule)")
         print(to_markdown(rows))
         _warn_on_errors(rows, collected)
@@ -728,7 +733,10 @@ def build_parser() -> argparse.ArgumentParser:
             "--max-real-calls",
             type=int,
             default=None,
-            help="hard cap on REAL API calls for a single judge (needs --cache)",
+            help=(
+                "hard cap on REAL API calls for a single judge (needs --cache); with --workers N "
+                "it can be overshot by up to N calls already in flight"
+            ),
         )
         q.add_argument(
             "--max-strong-calls",

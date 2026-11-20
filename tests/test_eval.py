@@ -109,3 +109,13 @@ def test_cli_schedules_and_eval(capsys, tmp_path):
     )
     assert out.read_text().count('"strategy"') == 2
     assert main(["eval", "--strategies", "bogus"]) == 2
+
+
+@pytest.mark.parametrize("indices", [[3], [-1], [1, 0], [0, 0]])
+def test_suite_file_with_bad_attack_indices_is_rejected(indices):
+    import json
+
+    ep = {"id": "e", "family": "x", "task": "t", "outputs": [["web", "a"]] * 3,
+          "attack_indices": indices}  # fmt: skip
+    with pytest.raises(ValueError, match="attack_indices"):
+        episodes_from_json(json.dumps([ep]))

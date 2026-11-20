@@ -96,7 +96,7 @@ Rules:
 - Record your verdict with the record_verdict tool.
 """
 
-_TAG = re.compile(r"</?\s*tool_output", re.IGNORECASE)
+_TAG = re.compile(r"<\s*/?\s*tool_output", re.IGNORECASE)
 
 
 def sanitize(content: str) -> str:

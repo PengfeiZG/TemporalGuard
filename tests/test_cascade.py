@@ -161,6 +161,13 @@ def test_cli_max_real_calls_stops_cleanly_and_requires_a_cache(tmp_path, capsys)
     assert "stopped:" in capsys.readouterr().err
 
 
+def test_cli_adaptive_run_also_stops_cleanly_at_the_cap(tmp_path, capsys):
+    argv = ["eval", "--adaptive", "--strategies", "full", "--max-real-calls", "1",
+            "--cache", str(tmp_path / "c.jsonl")]  # fmt: skip
+    assert main(argv) == 3
+    assert "stopped:" in capsys.readouterr().err
+
+
 def test_budget_exceeded_is_not_swallowed_as_a_judge_error():
     from temporalguard.judge.base import JudgeError
 
