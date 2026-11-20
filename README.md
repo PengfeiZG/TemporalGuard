@@ -48,7 +48,7 @@ git clone <your-repo-url> temporalguard && cd temporalguard
 python -m venv .venv
 source .venv/bin/activate              # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev,anthropic,openai,gemini,semantic]"
-python -m pytest -q                    # 301 tests, no network, no API key
+python -m pytest -q                    # 312 tests (311 pass, 1 expected failure), no network, no API key
 ```
 
 Extras: `dev` (tests and linters), `anthropic`, `openai` and `gemini` (the judges), `semantic` (sentence-transformers
@@ -381,7 +381,7 @@ Gap = share of attack sessions flagged minus share of twin sessions flagged (12 
   files. OpenAI runs need `TEMPORALGUARD_OPENAI_REASONING_EFFORT=none`. The models are `gpt-6-luna`,
   `gpt-6-sol`, `claude-haiku-5-5`, `claude-sonnet-5-5`, `gemini-3.1-pro-preview` and `gemini-3.1-flash-lite`.
   Preview models can change; a rerun later may not match.
-- **A cheap check that the code works:** `python -m pytest -q` runs 301 tests with no network.
+- **A cheap check that the code works:** `python -m pytest -q` runs 312 tests (311 pass, 1 expected failure) tests with no network.
 
 ## LogicInception-style attacks (pilot)
 
@@ -477,7 +477,7 @@ src/temporalguard/
                     batch runners (Anthropic, Gemini), gate calibration, report
   cli.py            temporalguard schedules | demo | make-suite | eval | gate-calibrate | li-lint | li-template
                     | ct3 (template, validate, probe) | ct4 (validate, probe) | batch-warm | gemini-batch
-tests/              301 tests (no network, no API key)
+tests/              312 tests (311 pass, 1 expected failure) (no network, no API key)
 data/               attack chains (li_attacks_A/B.csv), benign twins (li_benign_twins_A/B.csv), cross-tool v3 and v4 scenarios (both frozen) and a blank template
 docs/               ARCHITECTURE.md, AGENTDOJO_REVIEW.md, LI_WRITING_GUIDE.md, CROSS_TOOL.md (cross-tool v1 to v4:
                     history, v3 guide, v3 and v4 records), EXPERIMENT_LOG.md

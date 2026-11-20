@@ -19,7 +19,7 @@ keys); it is deliberately not part of this repository.
 | Seed | default (`--seed 0`) |
 | Caches | `runs\cache_openai.jsonl`, `runs\cache_claude.jsonl`, `runs\cache_openai_sol.jsonl`, `runs\cache_sonnet.jsonl`, `runs\cache_gemini_pro.jsonl`, `runs\cache_gemini_flash_lite.jsonl` (and older `cache_gemini_old.jsonl`, `cache_gemini_pro_old.jsonl`, `cache_anthropic.jsonl`). Keyed on judge name, model, prompt and window. Do not delete; they are git-ignored. |
 | Gemini judges | `gemini-3.1-pro-preview` and `gemini-3.1-flash-lite` (`--judge gemini`), run through Google's batch API where noted. Preview models can change. |
-| Code version | This repository, 301 tests, Python 3.13 (`pip install -e ".[dev,anthropic,openai,gemini,semantic]"`). |
+| Code version | This repository, 312 tests (311 pass, 1 expected failure), Python 3.13 (`pip install -e ".[dev,anthropic,openai,gemini,semantic]"`). |
 
 Keys are set in the shell only (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) and never written to files. Before a Claude run, check that `$env:TEMPORALGUARD_MODEL` is empty (it silently changes the default model), and before an OpenAI run that `TEMPORALGUARD_OPENAI_MODEL` and `TEMPORALGUARD_OPENAI_REASONING_EFFORT` are what you expect.
 
