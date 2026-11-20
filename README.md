@@ -44,7 +44,7 @@ Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Install
 
 ```bash
-git clone <your-repo-url> temporalguard && cd temporalguard
+git clone https://github.com/PengfeiZG/TemporalGuard.git temporalguard && cd temporalguard
 python -m venv .venv
 source .venv/bin/activate              # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev,anthropic,openai,gemini,semantic]"
@@ -109,8 +109,8 @@ temporalguard eval --judge openai --model <model-id> --per-family 2 --benign 5
 
 In code: `from temporalguard.judge import OpenAIJudge`. The model comes from `--model`, the
 `model=` argument, or `TEMPORALGUARD_OPENAI_MODEL`; the built-in default is a best guess at a cheap
-current model, so set it explicitly. Neither real-API judge has been run against the live service
-by the authors yet; the unit tests use a fake client.
+current model, so set it explicitly. All results below come from live API runs; the unit tests
+use a fake client so they need no key.
 
 Prices are deliberately not built in because they change.
 
@@ -243,7 +243,7 @@ Strategies: `fib_min3_fallback_confirm_kwgated`, `_semgated`, `_hashgated`, `gat
 setting; thinking tokens are billed as output). If the model answers in text instead of calling the tool,
 the judge passes that text back and asks for the tool call (up to twice), counting the tokens of every
 attempt; a window that still fails reports the stop reason and the model's last text in the error. Models without forced tool use get a 2000-token reply budget (thinking counts against it); an empty reply with `stop_reason=max_tokens` means the budget was exhausted. Haiku 5.5 keeps the
-forced call, and existing cache entries are unaffected. Unit-tested with a fake client, not yet run against the live Sonnet API.
+forced call, and existing cache entries are unaffected. The Sonnet 5.5 results below were run live.
 
 **OpenAI models without `none` effort.** GPT-6.1 Sol and GPT-6 Astra do not accept `none` and cannot
 do function calls on Chat Completions. Give a cascade tier an effort, `--strong openai:gpt-6.1-sol@low`,
@@ -319,6 +319,22 @@ a final full-history fallback and a confirm-on-flag call (`fib_min3_fallback_con
    recall to 0.98 but overlap the benchmark's topics, so we treat them as optimistic.
 
 The full pipeline (gate plus cascade) costs about 17% of the strong judge alone on both vendors.
+
+**Gemini (Flash-Lite cheap, 3.1 Pro preview strong).** The same 27 AgentDojo-derived attacks with the final
+design (`runs/gemini_cascade_ad_cheaponly.md`, `gemini_cascade_ad_cascade.md`, `gemini_pro_final.md`):
+
+| Judge | Recall | Oldest-fragment recall | Tokens/output | $/output |
+|---|---|---|---|---|
+| Flash-Lite only | 0.93 | 0.74 [0.59, 0.89] | 773 | 0.00034 |
+| Flash-Lite → Pro cascade | 0.89 | 0.85 [0.70, 0.96] | 952 | 0.00171 |
+| Pro only | 0.93 | 0.89 [0.78, 1.00] | 1,007 | not recorded |
+
+The cascade recovers most of Pro's gain in oldest-fragment recall, but the intervals overlap, and unlike the
+Claude and OpenAI cascades it lost one attack (recall 0.93 to 0.89). On 40 AgentDojo benign sessions the
+cascade flags 17% of sessions with single reads and with the final design (15% with full history; about 1% of outputs;
+`gemini_cascade_ad_benign.md`). On the 16 attack/twin pairs it raises twin-pair accuracy from 0.19 to 0.44
+with the final design and from 0.62 to 0.81 with full history (`gemini_cascade_twin8*.md`). The Pro-only run
+is attacks only, so it gives no false-alarm rate.
 
 ### LogicInception-style pilot: directive-free chains and benign twins
 
@@ -516,7 +532,10 @@ THIRD_PARTY_NOTICES.md   AgentDojo (MIT) notice
 - **A cascade cannot raise detection above the cheap judge's.** It only sees windows the cheap judge flags.
 - **The adaptive attacker targets the window schedules, not the cascade or the gate.** An attacker who knows
   the gate's exemplars or the strong judge was not tested.
-- **Not tested:** larger models (for example Claude Opus), strong judges (Sonnet, Gemini Pro, Sol) on cross-tool v3 (only the cheap judges were run; v4 has all six), any scenario that needs three records to be caught (v4 needs two at most), and GPT-6.1 Sol (it cannot do forced tool calls with reasoning disabled, which this judge needs).
+- **Not done (future work):** end-to-end agent runs that measure task completion; an adaptive attacker
+  aimed at the gate or the cascade; strong judges (Sonnet, Gemini Pro, Sol) on cross-tool v3 (only the cheap
+  judges were run; v4 has all six). These would need new paid runs.
+- **Not tested:** larger models (for example Claude Opus), any scenario that needs three records to be caught (v4 needs two at most), and GPT-6.1 Sol (it cannot do forced tool calls with reasoning disabled, which this judge needs).
 - **The LogicInception-style pilot is small.** Twelve chains reused across three families, written by the authors;
   the benign twins are harmless but partly off-task. The notice-voice results mix detecting the attack with
   reacting to the notice format.

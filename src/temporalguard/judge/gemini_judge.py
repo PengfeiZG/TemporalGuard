@@ -1,4 +1,5 @@
 """Gemini semantic judge using the official google-genai SDK."""
+
 from __future__ import annotations
 
 import json
@@ -37,15 +38,15 @@ class GeminiJudge(Judge):
         try:
             from google.genai import types
         except ImportError as exc:
-            raise ImportError('GeminiJudge needs google-genai') from exc
+            raise ImportError("GeminiJudge needs google-genai") from exc
         start = time.perf_counter()
         try:
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=build_user_message(window, task),
                 config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT +
-                    "\nReturn ONLY a JSON object with fields: malicious (boolean), "
+                    system_instruction=SYSTEM_PROMPT
+                    + "\nReturn ONLY a JSON object with fields: malicious (boolean), "
                     "confidence (number), needs_more_context (boolean), "
                     "fragment_indices (integer array), reconstructed_instruction (string), "
                     "attack_type (string), rationale (string).",
@@ -64,8 +65,8 @@ class GeminiJudge(Judge):
         usage = getattr(response, "usage_metadata", None)
         result.usage = Usage(
             int(getattr(usage, "prompt_token_count", 0) or 0),
-            int(getattr(usage, "candidates_token_count", 0) or 0) +
-            int(getattr(usage, "thoughts_token_count", 0) or 0),
+            int(getattr(usage, "candidates_token_count", 0) or 0)
+            + int(getattr(usage, "thoughts_token_count", 0) or 0),
             calls=1,
             latency_s=latency,
         )

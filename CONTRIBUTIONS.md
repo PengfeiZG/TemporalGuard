@@ -3,6 +3,9 @@
 IST 597 requires each team member to document their own contributions. Fill this in as you go
 (the git history is the evidence; use feature branches and pull requests so authorship is clear).
 
+> **TODO before submission:** replace _Member A_ / _Member B_ with each author's name and fill in the
+> Notes column. The owners below are placeholders, not a record of who did what.
+
 | Area | Owner | Notes / commits / PRs |
 |---|---|---|
 | Engine, schedules, verdict policy | _Member A_ | |
